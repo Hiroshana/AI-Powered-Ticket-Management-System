@@ -51,4 +51,5 @@ Before calling work done, run `bun run typecheck` and `cd server && bun test`.
 
 - TypeScript strict; relative imports include the `.ts`/`.tsx` extension.
 - Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
-- Planned but not yet set up: data models (User, Session, Ticket), session auth, Claude API, email provider. Fetch their docs via Context7 when implementing them.
+- Auth: Better Auth (`server/src/lib/auth.ts`), email/password, sessions stored in Postgres, public sign-up disabled. Protect routes with `requireAuth` from `src/middleware/auth.ts` (sets `req.user` / `req.session`). First admin: `cd server && bun run db:seed` (reads `ADMIN_*` from `.env`).
+- Planned but not yet set up: Ticket model, roles, Claude API, email provider. Fetch their docs via Context7 when implementing them.

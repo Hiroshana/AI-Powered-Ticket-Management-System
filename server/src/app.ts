@@ -1,6 +1,9 @@
 import express from "express";
 import cors from "cors";
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "./lib/auth.ts";
 import { healthRouter } from "./routes/health.ts";
+import { meRouter } from "./routes/me.ts";
 import { errorHandler, notFound } from "./middleware/error.ts";
 
 export function createApp() {
@@ -12,9 +15,14 @@ export function createApp() {
       credentials: true,
     }),
   );
+
+  // Better Auth must be mounted before express.json() — it reads the raw body.
+  app.all("/api/auth/*splat", toNodeHandler(auth));
+
   app.use(express.json());
 
   app.use("/api/health", healthRouter);
+  app.use("/api/me", meRouter);
 
   app.use(notFound);
   app.use(errorHandler);
