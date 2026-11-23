@@ -1,0 +1,46 @@
+# CLAUDE.md
+
+AI-powered support ticket management system. See `project-scope.md` (features, statuses, categories, roles), `tech-stack.md`, and `implementation-plan.md` (phased checklist — tick items off as they are completed).
+
+## Documentation lookup (Context7)
+
+Always use the Context7 MCP server to fetch current docs before writing or changing code that depends on a library, framework, CLI or API — even well-known ones. Versions in this repo are newer than most training data (Express 5, React 19, React Router 8, Vite 8, Tailwind v4, TypeScript 7, Bun 1.3).
+
+1. `resolve-library-id` with the library name (skip if the `/org/project` ID is known).
+2. `query-docs` with that ID, one concept per query; pass a version-specific ID when one matches the installed version in `package.json`.
+3. Write code from the fetched docs, not from memory.
+
+Known IDs: `/oven-sh/bun`, `/expressjs/express`, `/vitejs/vite`, `/remix-run/react-router`, `/tailwindlabs/tailwindcss.com`, `/expressjs/session`.
+
+## Commands
+
+Run from the repo root (Bun workspaces: `client`, `server`). Use `bun`, never npm/yarn/pnpm.
+
+- `bun install` — install all workspaces
+- `bun run dev` — client (http://localhost:5173) + server (http://localhost:3000) in watch mode
+- `bun run dev:client` / `bun run dev:server` — one side only
+- `bun run typecheck` — type-check both packages
+- `bun run build` — build both packages
+- `cd server && bun test` — server tests (`bun:test`)
+- Add a dependency: `cd client && bun add <pkg>` (or `server`)
+
+Before calling work done, run `bun run typecheck` and `cd server && bun test`.
+
+## Architecture
+
+- **server/** — Express 5 running directly on the Bun runtime (no compile step in dev).
+  - `src/app.ts` exports `createApp()`; `src/index.ts` only calls `listen`. Tests import `createApp()` and listen on port 0.
+  - Routers live in `src/routes/` and are mounted under `/api/...` in `app.ts`.
+  - Throw `HttpError(status, message)` from `src/middleware/error.ts` for expected errors; the error handler returns `{ error }` JSON. Express 5 forwards rejected promises from async handlers automatically — no try/catch wrappers needed.
+  - Config via env vars (`server/.env`, template in `.env.example`).
+- **client/** — React 19 + Vite + Tailwind CSS v4 + React Router (declarative mode).
+  - Vite proxies `/api/*` to the server, so call `fetch('/api/...')` with relative URLs.
+  - Routes are declared in `src/App.tsx` inside `<Layout>`; pages in `src/pages/`, shared UI in `src/components/`.
+  - Import router APIs from `react-router` (not `react-router-dom`).
+  - Tailwind v4 is configured via `@import "tailwindcss"` in `src/index.css` and the `@tailwindcss/vite` plugin — there is no `tailwind.config.js`.
+
+## Conventions
+
+- TypeScript strict; relative imports include the `.ts`/`.tsx` extension.
+- Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
+- Planned but not yet set up: PostgreSQL + Prisma, session auth, Claude API, email provider. Fetch their docs via Context7 when implementing them.
