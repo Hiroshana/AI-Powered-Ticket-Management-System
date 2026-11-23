@@ -5,7 +5,7 @@
 - [x] Initialize monorepo structure (`/client`, `/server`)
 - [x] Set up Express server with TypeScript
 - [x] Set up React app with TypeScript
-- [ ] Set up PostgreSQL database
+- [x] Set up PostgreSQL database (Prisma 7, `ai_powered_ims`)
 
 ## Phase 2: Authentication
 

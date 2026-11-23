@@ -5,7 +5,7 @@ Full-stack TypeScript monorepo run with [Bun](https://bun.sh) workspaces.
 | Package   | Stack                                              | Dev URL               |
 | --------- | -------------------------------------------------- | --------------------- |
 | `client/` | React 19, Vite, Tailwind CSS v4, React Router      | http://localhost:5173 |
-| `server/` | Express 5 on the Bun runtime                       | http://localhost:3000 |
+| `server/` | Express 5 on the Bun runtime, Prisma 7 + PostgreSQL | http://localhost:3000 |
 
 In development, Vite proxies `/api/*` to the Express server, so the client calls `fetch('/api/...')` directly.
 
@@ -13,7 +13,8 @@ In development, Vite proxies `/api/*` to the Express server, so the client calls
 
 ```sh
 bun install          # installs all workspaces
-cp server/.env.example server/.env
+cp server/.env.example server/.env   # then set DATABASE_URL (PostgreSQL, db: ai_powered_ims)
+(cd server && bun run db:migrate)    # creates the database if missing and applies migrations
 bun run dev          # starts client + server in parallel
 ```
 
@@ -27,6 +28,8 @@ bun run dev          # starts client + server in parallel
 | `bun run build`      | Build both packages                 |
 | `bun run typecheck`  | Type-check both packages            |
 | `cd server && bun test` | Run server tests                 |
+| `cd server && bun run db:migrate` | Create/apply Prisma migrations |
+| `cd server && bun run db:studio` | Open Prisma Studio |
 
 ## Layout
 
@@ -38,4 +41,7 @@ server/src/
   app.ts        Express app factory (used by index.ts and tests)
   routes/       API routers mounted under /api
   middleware/   404 + error handling (HttpError)
+  lib/prisma.ts shared PrismaClient (pg driver adapter)
+server/prisma/
+  schema.prisma Prisma schema (URL is in server/prisma.config.ts)
 ```

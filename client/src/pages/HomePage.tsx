@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-type Health = { status: string; timestamp: string }
+type Health = { status: string; database: string; timestamp: string }
 
 export default function HomePage() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -25,7 +25,8 @@ export default function HomePage() {
         {!error && !health && <p className="text-gray-400">Checking…</p>}
         {health && (
           <p className="text-green-700">
-            {health.status} — {new Date(health.timestamp).toLocaleTimeString()}
+            {health.status} (database: {health.database}) —{" "}
+            {new Date(health.timestamp).toLocaleTimeString()}
           </p>
         )}
       </div>
