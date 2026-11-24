@@ -1,9 +1,11 @@
 import { Route, Routes } from 'react-router'
 import Layout from './components/Layout.tsx'
+import RequireAdmin from './components/RequireAdmin.tsx'
 import RequireAuth from './components/RequireAuth.tsx'
 import HomePage from './pages/HomePage.tsx'
 import LoginPage from './pages/LoginPage.tsx'
 import NotFoundPage from './pages/NotFoundPage.tsx'
+import UsersPage from './pages/UsersPage.tsx'
 
 export default function App() {
   return (
@@ -12,6 +14,9 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />
+          <Route element={<RequireAdmin />}>
+            <Route path="users" element={<UsersPage />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<NotFoundPage />} />

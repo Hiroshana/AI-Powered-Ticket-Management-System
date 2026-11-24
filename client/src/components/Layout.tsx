@@ -17,6 +17,11 @@ export default function Layout() {
           <Link to="/" className="font-semibold">
             AI - Powered Ticket Management System
           </Link>
+          {session?.user.role === 'ADMIN' && (
+            <Link to="/users" className="text-sm hover:underline">
+              Users
+            </Link>
+          )}
           {session && (
             <div className="ml-auto flex items-center gap-4">
               <span className="text-sm text-gray-700">{session.user.name}</span>
