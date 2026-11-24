@@ -1,25 +1,42 @@
-import { useState, type FormEvent } from 'react'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
 import { Navigate, useNavigate } from 'react-router'
+import { z } from 'zod'
 import { authClient } from '../lib/auth-client.ts'
+
+const loginSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required')
+    .pipe(z.email('Enter a valid email address')),
+  password: z.string().min(1, 'Password is required'),
+})
+
+type LoginValues = z.infer<typeof loginSchema>
+
+const inputClass =
+  'w-full rounded-md border px-3 py-2 focus:outline-none focus:ring-1 aria-invalid:border-red-500 aria-invalid:focus:ring-red-500 border-gray-300 focus:border-blue-500 focus:ring-blue-500'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = authClient.useSession()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: '', password: '' },
+  })
 
   if (!sessionPending && session) return <Navigate to="/" replace />
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setError(null)
-    setSubmitting(true)
-    const { error } = await authClient.signIn.email({ email, password })
-    setSubmitting(false)
+  async function onSubmit(values: LoginValues) {
+    const { error } = await authClient.signIn.email(values)
     if (error) {
-      setError(error.message ?? 'Invalid email or password')
+      setError('root', { message: error.message ?? 'Invalid email or password' })
       return
     }
     navigate('/', { replace: true })
@@ -31,10 +48,10 @@ export default function LoginPage() {
         <h1 className="mb-1 text-xl font-bold">Sign in</h1>
         <p className="mb-6 text-sm text-gray-500">AI - Powered Ticket Management System</p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          {errors.root?.message && (
             <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
+              {errors.root.message}
             </p>
           )}
           <div className="space-y-1">
@@ -45,11 +62,13 @@ export default function LoginPage() {
               id="email"
               type="email"
               autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-invalid={errors.email ? true : undefined}
+              {...register('email')}
+              className={inputClass}
             />
+            {errors.email?.message && (
+              <p className="text-sm text-red-600">{errors.email.message}</p>
+            )}
           </div>
           <div className="space-y-1">
             <label htmlFor="password" className="block text-sm font-medium">
@@ -59,18 +78,20 @@ export default function LoginPage() {
               id="password"
               type="password"
               autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              aria-invalid={errors.password ? true : undefined}
+              {...register('password')}
+              className={inputClass}
             />
+            {errors.password?.message && (
+              <p className="text-sm text-red-600">{errors.password.message}</p>
+            )}
           </div>
           <button
             type="submit"
-            disabled={submitting}
+            disabled={isSubmitting}
             className="w-full rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
       </div>
