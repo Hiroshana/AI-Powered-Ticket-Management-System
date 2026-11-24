@@ -1,5 +1,5 @@
 // Creates the first admin from ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME.
-// Safe to re-run: does nothing if a user with that email already exists.
+// Safe to re-run: if the user already exists, it only ensures their role is ADMIN.
 // Public sign-up is disabled, so this goes through Better Auth's internal
 // adapter (same hashing + account rows as a normal sign-up).
 import { auth } from "../src/lib/auth.ts";
@@ -15,10 +15,17 @@ if (!email || !password) {
 
 const ctx = await auth.$context;
 
-if (await ctx.internalAdapter.findUserByEmail(email)) {
-  console.log(`Admin ${email} already exists, skipping.`);
+const existing = await ctx.internalAdapter.findUserByEmail(email);
+
+if (existing) {
+  // Make sure an admin created before roles existed gets the ADMIN role.
+  await prisma.user.update({ where: { id: existing.user.id }, data: { role: "ADMIN" } });
+  console.log(`Admin ${email} already exists, ensured role ADMIN.`);
 } else {
-  const user = await ctx.internalAdapter.createUser({ email, name }, { method: "admin" });
+  const user = await ctx.internalAdapter.createUser(
+    { email, name, role: "ADMIN" },
+    { method: "admin" },
+  );
   await ctx.internalAdapter.linkAccount({
     userId: user.id,
     providerId: "credential",

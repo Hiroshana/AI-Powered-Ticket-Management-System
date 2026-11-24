@@ -7,6 +7,19 @@ import { prisma } from "./prisma.ts";
 // so signing out or revoking a session takes effect immediately.
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
+  user: {
+    additionalFields: {
+      // Mirrors the `Role` enum in prisma/schema.prisma.
+      // input: false — only the server (seed, admin routes) can set a role;
+      // it can never be supplied through sign-up or update-user requests.
+      role: {
+        type: ["ADMIN", "AGENT"],
+        required: false,
+        defaultValue: "AGENT",
+        input: false,
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     // Users are created by an admin (or the seed script), never self-registered.
