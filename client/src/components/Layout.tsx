@@ -1,6 +1,15 @@
-import { Link, Outlet } from 'react-router'
+import { Link, Outlet, useNavigate } from 'react-router'
+import { authClient } from '../lib/auth-client.ts'
 
 export default function Layout() {
+  const navigate = useNavigate()
+  const { data: session } = authClient.useSession()
+
+  async function handleSignOut() {
+    await authClient.signOut()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="border-b border-gray-200 bg-white">
@@ -8,6 +17,18 @@ export default function Layout() {
           <Link to="/" className="font-semibold">
             AI - Powered Ticket Management System
           </Link>
+          {session && (
+            <div className="ml-auto flex items-center gap-4">
+              <span className="text-sm text-gray-700">{session.user.name}</span>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-100"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
         </nav>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8">
