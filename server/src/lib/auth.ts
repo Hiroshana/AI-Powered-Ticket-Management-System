@@ -10,7 +10,7 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       // Mirrors the `Role` enum in prisma/schema.prisma.
-      // input: false — only the server (seed, admin routes) can set a role;
+      // input: false â€” only the server (seed, admin routes) can set a role;
       // it can never be supplied through sign-up or update-user requests.
       role: {
         type: ["ADMIN", "AGENT"],
@@ -26,6 +26,13 @@ export const auth = betterAuth({
     disableSignUp: true,
   },
   trustedOrigins: [process.env.CLIENT_ORIGIN ?? "http://localhost:5173"],
+  // On only in production (`bun run start` sets NODE_ENV=production); off in
+  // dev and tests so repeated sign-ins don't get blocked. Uses Better Auth's
+  // defaults: 100 requests / 10s per IP, and its built-in stricter rule of
+  // 3 / 10s for sign-in, sign-up, change-password and change-email.
+  rateLimit: {
+    enabled: process.env.NODE_ENV === "production",
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;

@@ -6,3 +6,10 @@ dist/
 !.env.example
 *.log
 .DS_Store
+!.env.test.example
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

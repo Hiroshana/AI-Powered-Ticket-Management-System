@@ -21,7 +21,9 @@ Run from the repo root (Bun workspaces: `client`, `server`). Use `bun`, never np
 - `bun run dev:client` / `bun run dev:server` — one side only
 - `bun run typecheck` — type-check both packages
 - `bun run build` — build both packages
-- `cd server && bun test` — server tests (`bun:test`; needs the database running)
+- `cd server && bun test` — server tests (`bun:test`; needs the database running). Uses the **test** database (see below), so run `bun run db:test:prepare` once first
+- `bun run test:e2e` — Playwright E2E tests (`cd e2e && bun run test:ui` for UI mode). First time: `cd e2e && bunx playwright install chromium`
+- `cd server && bun run db:test:prepare` — create/migrate the test DB, empty all tables, seed the `E2E_*` users
 - `cd server && bun run db:migrate -- --name <name>` — create + apply a migration after editing `prisma/schema.prisma`
 - `cd server && bun run db:generate` — regenerate Prisma Client (also runs on `bun install`)
 - `cd server && bun run db:studio` — browse data
@@ -41,6 +43,9 @@ Before calling work done, run `bun run typecheck` and `cd server && bun test`.
   - Client is generated to `server/src/generated/prisma/` (git-ignored). Import the shared instance from `src/lib/prisma.ts`; never construct another `PrismaClient`.
   - Prisma 7 requires a driver adapter (`@prisma/adapter-pg`) and does not load `.env` — always run the CLI via the `db:*` scripts (`bun --bun prisma ...`).
   - `GET /api/health` runs `SELECT 1` and returns 503 if the database is down.
+- **Test database** — `ai_powered_ims_test`. Bun loads `server/.env.test` on top of `.env` whenever `NODE_ENV=test` (`bun test` sets it; the `db:test:prepare` and `start:test` scripts set it explicitly). `.env.test` is git-ignored; copy `server/.env.test.example` and use the same DB credentials as `.env`. `prisma/prepare-test-db.ts` refuses to run unless the DB name ends in `_test`. Don't use `prisma migrate reset` for it.
+- **e2e/** — Playwright workspace (Chromium only). `playwright.config.ts` starts its own server on :3001 (after running `db:test:prepare`) and client on :5174 (Vite proxy pointed there via `API_PROXY_TARGET`), so it never reuses a dev server and can run alongside `bun run dev`. Data is reset on every run. Sign in with the seeded `E2E_ADMIN_*` / `E2E_AGENT_*` users from `.env.test`. Tests go in `e2e/tests/`.
+- **Creating users** — `createCredentialUser()` in `server/src/lib/users.ts` (used by the seed scripts).
 - **client/** — React 19 + Vite + Tailwind CSS v4 + React Router (declarative mode).
   - Vite proxies `/api/*` to the server, so call `fetch('/api/...')` with relative URLs.
   - Routes are declared in `src/App.tsx` inside `<Layout>`; pages in `src/pages/`, shared UI in `src/components/`.
@@ -55,9 +60,10 @@ Before calling work done, run `bun run typecheck` and `cd server && bun test`.
 
 Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Before changing it, load the `better-auth-best-practices` skill and fetch the Better Auth docs via Context7.
 
-- **No public sign-up** (`disableSignUp: true`). Users are created server-side through Better Auth's internal adapter: `ctx.internalAdapter.createUser(...)` + `linkAccount({ providerId: "credential", password: await ctx.password.hash(...) })`, where `ctx = await auth.$context`. See `prisma/seed.ts` and `src/auth.test.ts`. Never write `user`/`account` rows or password hashes with Prisma directly.
+- **No public sign-up** (`disableSignUp: true`). Users are created server-side through Better Auth's internal adapter: `ctx.internalAdapter.createUser(...)` + `linkAccount({ providerId: "credential", password: await ctx.password.hash(...) })`, where `ctx = await auth.$context`. This is wrapped in `createCredentialUser()` (`src/lib/users.ts`); use it. Never write `user`/`account` rows or password hashes with Prisma directly.
 - **First admin:** `cd server && bun run db:seed` (reads `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` from `.env`). Re-running it is safe: an existing user is just promoted to `ADMIN`.
 - **Sessions** live in the Postgres `session` table (no cookie cache or secondary storage), so sign-out and revocation take effect immediately. The session is an HTTP-only cookie; the client never handles tokens.
+- **Rate limiting** is on only when `NODE_ENV=production` (`rateLimit.enabled` in `auth.ts`; `bun run start` sets it). Dev, `bun test` and E2E runs are not limited. Production uses Better Auth's defaults (100 req / 10s, sign-in 3 / 10s) with in-memory storage, so the limit applies per server instance.
 - **Roles:** `Role` enum (`ADMIN`, `AGENT`) in `schema.prisma`, mirrored as the `role` additional field in `auth.ts` (default `AGENT`, `input: false`, so clients can never set it). If you add a role, update both places. Change roles server-side only.
 - **Tables:** `user`, `session`, `account`, `verification` are Better Auth's models (`@@map` to lowercase names). If you change the auth config in a way that needs new fields, update `schema.prisma` by hand and run `db:migrate`.
 - **Env:** `BETTER_AUTH_SECRET` (32+ chars), `BETTER_AUTH_URL` (the server origin, `http://localhost:3000`), `CLIENT_ORIGIN` (used for CORS and `trustedOrigins`).
@@ -72,10 +78,13 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - `src/lib/auth-client.ts` exports `authClient = createAuthClient()` from `better-auth/react` with no `baseURL`. It calls same-origin `/api/auth/*` through the Vite proxy, which keeps the cookie first-party. Don't add a `baseURL` pointing at `:3000`.
 - Use `authClient.useSession()` for `{ data: session, isPending }`, `authClient.signIn.email({ email, password })` (returns `{ error }`, doesn't throw) and `authClient.signOut()`.
 - Protected pages go inside the `<RequireAuth>` layout route in `src/App.tsx`. It shows a loader while `isPending` and redirects to `/login` when there's no session. `/login` sits outside it and redirects to `/` if a user is already signed in.
-- Client-side checks are only UX. Every protected API route must still use `requireAuth` (and role checks once they exist) on the server.
+- Admin-only pages go inside the `<RequireAdmin>` layout route (nested in `<RequireAuth>`); non-admins are redirected to `/`. `/users` is the example. Show admin-only UI with `session?.user.role === 'ADMIN'` (see the "Users" link in `Layout.tsx`).
+- `session.user.role` is typed on the client via `inferAdditionalFields` in `auth-client.ts`, declared by hand because the client can't import the server's `auth` type. Keep it in sync with `auth.ts` and the `Role` enum.
+- Client-side checks are only UX. Every protected API route must still use `requireAuth` on the server, and admin routes need a server-side role check. There's no `requireAdmin` middleware yet: add one (throws `HttpError(403)` unless `req.user.role === "ADMIN"`) with the first admin API route.
 
 ## Conventions
 
 - TypeScript strict; relative imports include the `.ts`/`.tsx` extension.
 - Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
-- Planned but not yet set up: Ticket model, role-based authorization (roles exist, nothing enforces them yet), user management, Claude API, email provider. Fetch their docs via Context7 when implementing them.
+- Security review: ask for the `security-reviewer` subagent (`.claude/agents/security-reviewer.md`). It only reports; it doesn't fix.
+- Planned but not yet set up: Ticket model, server-side role enforcement (client-side `RequireAdmin` exists), user management API and UI (`/users` is a placeholder heading), Claude API, email provider. Fetch their docs via Context7 when implementing them.
