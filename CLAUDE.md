@@ -87,4 +87,5 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - TypeScript strict; relative imports include the `.ts`/`.tsx` extension.
 - Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
 - Security review: ask for the `security-reviewer` subagent (`.claude/agents/security-reviewer.md`). It only reports; it doesn't fix.
+- E2E tests: ask for the `e2e-tester` subagent (`.claude/agents/e2e-tester.md`). It writes, runs and fixes Playwright tests in `e2e/`; it reports app bugs but doesn't fix them.
 - Planned but not yet set up: Ticket model, server-side role enforcement (client-side `RequireAdmin` exists), user management API and UI (`/users` is a placeholder heading), Claude API, email provider. Fetch their docs via Context7 when implementing them.
