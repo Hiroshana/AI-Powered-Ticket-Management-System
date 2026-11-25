@@ -26,6 +26,11 @@ export const auth = betterAuth({
     disableSignUp: true,
   },
   trustedOrigins: [process.env.CLIENT_ORIGIN ?? "http://localhost:5173"],
+  advanced: {
+    // Better Auth skips its origin and CSRF checks when NODE_ENV=test. Keep them
+    // on everywhere so tests exercise the same protection as production.
+    disableOriginCheck: false,
+  },
   // On only in production (`bun run start` sets NODE_ENV=production); off in
   // dev and tests so repeated sign-ins don't get blocked. Uses Better Auth's
   // defaults: 100 requests / 10s per IP, and its built-in stricter rule of

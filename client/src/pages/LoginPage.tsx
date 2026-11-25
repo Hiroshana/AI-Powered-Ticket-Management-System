@@ -27,6 +27,8 @@ const loginSchema = z.object({
 
 type LoginValues = z.infer<typeof loginSchema>
 
+const SIGN_IN_FAILED = 'Something went wrong. Please try again.'
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const { data: session, isPending: sessionPending } = authClient.useSession()
@@ -43,9 +45,19 @@ export default function LoginPage() {
   if (!sessionPending && session) return <Navigate to="/" replace />
 
   async function onSubmit(values: LoginValues) {
-    const { error } = await authClient.signIn.email(values)
-    if (error) {
-      setError('root', { message: error.message ?? 'Invalid email or password' })
+    try {
+      const { error } = await authClient.signIn.email(values)
+      if (error) {
+        setError('root', {
+          message: error.message || SIGN_IN_FAILED,
+        })
+        return
+      }
+    } catch {
+      // Network failures reject instead of returning `error`.
+      setError('root', {
+        message: 'Could not reach the server. Check your connection and try again.',
+      })
       return
     }
     navigate('/', { replace: true })

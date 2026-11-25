@@ -72,11 +72,11 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - The Better Auth handler is mounted at `app.all("/api/auth/*splat", toNodeHandler(auth))` **before** `express.json()`, because it reads the raw body. Keep that order.
 - Protect a route with `requireAuth` from `src/middleware/auth.ts`. It calls `auth.api.getSession({ headers: fromNodeHeaders(req.headers) })`, sets `req.user` / `req.session` (typed via a global `Express.Request` augmentation), or throws `HttpError(401)`. `GET /api/me` is the example.
 - For server-side calls to Better Auth endpoints, use `auth.api.*` with `fromNodeHeaders(req.headers)`.
-- Requests to `/api/auth/*` from tests must send an `Origin` header that matches `CLIENT_ORIGIN`, or Better Auth rejects them (see `src/auth.test.ts`).
+- Better Auth skips its origin/CSRF checks when `NODE_ENV=test` by default; `advanced.disableOriginCheck: false` in `auth.ts` keeps them on, so tests match production. POSTs to `/api/auth/*` from tests should send an `Origin` header that matches `CLIENT_ORIGIN` (see `src/auth.test.ts`); Better Auth rejects a wrong origin, or a missing one when cookies or Fetch Metadata headers are sent.
 
 **Client**
 - `src/lib/auth-client.ts` exports `authClient = createAuthClient()` from `better-auth/react` with no `baseURL`. It calls same-origin `/api/auth/*` through the Vite proxy, which keeps the cookie first-party. Don't add a `baseURL` pointing at `:3000`.
-- Use `authClient.useSession()` for `{ data: session, isPending }`, `authClient.signIn.email({ email, password })` (returns `{ error }`, doesn't throw) and `authClient.signOut()`.
+- Use `authClient.useSession()` for `{ data: session, isPending }`, `authClient.signIn.email({ email, password })` (returns `{ error }` for HTTP errors, but rejects on network failure, so wrap it in try/catch) and `authClient.signOut()`.
 - Protected pages go inside the `<RequireAuth>` layout route in `src/App.tsx`. It shows a loader while `isPending` and redirects to `/login` when there's no session. `/login` sits outside it and redirects to `/` if a user is already signed in.
 - Admin-only pages go inside the `<RequireAdmin>` layout route (nested in `<RequireAuth>`); non-admins are redirected to `/`. `/users` is the example. Show admin-only UI with `session?.user.role === 'ADMIN'` (see the "Users" link in `Layout.tsx`).
 - `session.user.role` is typed on the client via `inferAdditionalFields` in `auth-client.ts`, declared by hand because the client can't import the server's `auth` type. Keep it in sync with `auth.ts` and the `Role` enum.

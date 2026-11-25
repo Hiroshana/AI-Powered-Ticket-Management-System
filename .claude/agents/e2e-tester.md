@@ -43,7 +43,7 @@ If Chromium is missing, run `cd e2e && bunx playwright install chromium`. If Pos
 ## Authentication
 
 - Credentials come from `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD`, `E2E_AGENT_EMAIL` and `E2E_AGENT_PASSWORD` in `server/.env.test`. Playwright does not load that file. If the config doesn't do so yet, load only what is needed with Node's `process.loadEnvFile` (path resolved from `import.meta.dirname`) in a test helper, not in the config: variables loaded in the config are inherited by the web servers. Never hard-code credentials or print the file's contents.
-- Once several tests need a signed-in user, use Playwright's setup project: sign in each role in `e2e/tests/auth.setup.ts`, save `storageState` to `e2e/playwright/.auth/<role>.json`, and select a role with `test.use({ storageState })`. Before creating it, add `playwright/.auth/` to the root `.gitignore` (these files contain session cookies). Don't make a signed-in state the default for all tests.
+- Once several tests need a signed-in user, use Playwright's setup project: sign in each role in `e2e/tests/auth.setup.ts`, save `storageState` to `e2e/playwright/.auth/<role>.json`, and select a role with `test.use({ storageState })`. Before creating it, make sure `e2e/playwright/.auth/` is in the root `.gitignore` (these files contain session cookies). Don't make a signed-in state the default for all tests.
 - **Sign-out tests must sign in through the UI themselves.** Sessions are stored in Postgres and revoked on sign-out, so signing out with a shared `storageState` breaks every other test using it.
 - The login page's own tests must not use saved state.
 - Rate limiting is off in these runs; don't work around it.
