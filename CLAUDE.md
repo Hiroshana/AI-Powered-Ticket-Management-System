@@ -80,7 +80,7 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - Protected pages go inside the `<RequireAuth>` layout route in `src/App.tsx`. It shows a loader while `isPending` and redirects to `/login` when there's no session. `/login` sits outside it and redirects to `/` if a user is already signed in.
 - Admin-only pages go inside the `<RequireAdmin>` layout route (nested in `<RequireAuth>`); non-admins are redirected to `/`. `/users` is the example. Show admin-only UI with `session?.user.role === 'ADMIN'` (see the "Users" link in `Layout.tsx`).
 - `session.user.role` is typed on the client via `inferAdditionalFields` in `auth-client.ts`, declared by hand because the client can't import the server's `auth` type. Keep it in sync with `auth.ts` and the `Role` enum.
-- Client-side checks are only UX. Every protected API route must still use `requireAuth` on the server, and admin routes need a server-side role check. There's no `requireAdmin` middleware yet: add one (throws `HttpError(403)` unless `req.user.role === "ADMIN"`) with the first admin API route.
+- Client-side checks are only UX. Every protected API route must still use `requireAuth` on the server, and admin routes need a server-side role check. Use `requireAdmin` from `src/middleware/auth.ts` after `requireAuth` (throws `HttpError(403)` for non-admins); `src/routes/users.ts` applies both to its whole router.
 
 ## Conventions
 
@@ -88,4 +88,4 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
 - Security review: ask for the `security-reviewer` subagent (`.claude/agents/security-reviewer.md`). It only reports; it doesn't fix.
 - E2E tests: ask for the `e2e-tester` subagent (`.claude/agents/e2e-tester.md`). It writes, runs and fixes Playwright tests in `e2e/`; it reports app bugs but doesn't fix them.
-- Planned but not yet set up: Ticket model, server-side role enforcement (client-side `RequireAdmin` exists), user management API and UI (`/users` is a placeholder heading), Claude API, email provider. Fetch their docs via Context7 when implementing them.
+- Planned but not yet set up: Ticket model, creating/editing/deleting users (`/users` and `GET /api/users` only list them), Claude API, email provider. Fetch their docs via Context7 when implementing them.

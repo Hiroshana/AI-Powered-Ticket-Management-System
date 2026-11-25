@@ -22,3 +22,9 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   req.session = result.session;
   next();
 };
+
+// Allows only admins. Must run after requireAuth, which sets req.user.
+export const requireAdmin: RequestHandler = (req, _res, next) => {
+  if (req.user?.role !== "ADMIN") throw new HttpError(403, "Forbidden");
+  next();
+};
