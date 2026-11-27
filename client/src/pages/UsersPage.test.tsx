@@ -1,10 +1,19 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { api } from '@/lib/api'
-import UsersPage from './UsersPage.tsx'
+
+// The real auth client needs a browser origin, so stub the session. It must be
+// mocked before UsersPage is loaded, hence the dynamic import.
+const refetchSession = mock(() => Promise.resolve())
+mock.module('../lib/auth-client.ts', () => ({
+  authClient: {
+    useSession: () => ({ data: { user: { id: 'u1', role: 'ADMIN' } }, refetch: refetchSession }),
+  },
+}))
+const { default: UsersPage } = await import('./UsersPage.tsx')
 
 const users = [
   {
@@ -31,6 +40,7 @@ const getSpy = spyOn(api, 'get')
 
 afterEach(() => {
   getSpy.mockReset()
+  refetchSession.mockClear()
 })
 
 function renderPage() {
@@ -88,7 +98,7 @@ describe('UsersPage', () => {
     const headers = within(table)
       .getAllByRole('columnheader')
       .map((th) => th.textContent)
-    expect(headers).toEqual(['Name', 'Email', 'Role', 'Created'])
+    expect(headers).toEqual(['Name', 'Email', 'Role', 'Created', 'Actions'])
 
     const rows = within(table).getAllByRole('row').slice(1) // skip header row
     expect(rows).toHaveLength(2)
@@ -99,8 +109,8 @@ describe('UsersPage', () => {
         .map((td) => td.textContent),
     )
     expect(cells).toEqual([
-      ['Ada Admin', 'ada@example.com', 'Admin', formatDate(users[0]!.createdAt)],
-      ['Alan Agent', 'alan@example.com', 'Agent', formatDate(users[1]!.createdAt)],
+      ['Ada Admin', 'ada@example.com', 'Admin', formatDate(users[0]!.createdAt), ''],
+      ['Alan Agent', 'alan@example.com', 'Agent', formatDate(users[1]!.createdAt), ''],
     ])
   })
 
@@ -195,5 +205,53 @@ describe('UsersPage create user dialog', () => {
     await user.click(document.body)
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+})
+
+describe('UsersPage edit user dialog', () => {
+  const patchSpy = spyOn(api, 'patch')
+
+  afterEach(() => {
+    patchSpy.mockReset()
+  })
+
+  async function openEdit(name: string) {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok({ users }))
+    renderPage()
+    await screen.findByRole('table', { name: 'Users' })
+    await user.click(screen.getByRole('button', { name: `Edit ${name}` }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit user' })
+    return { user, dialog }
+  }
+
+  test('every row has an edit button', async () => {
+    getSpy.mockReturnValue(ok({ users }))
+    renderPage()
+    await screen.findByRole('table', { name: 'Users' })
+
+    expect(screen.getByRole('button', { name: 'Edit Ada Admin' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit Alan Agent' })).toBeInTheDocument()
+  })
+
+  test("another user's role can be changed", async () => {
+    const { dialog } = await openEdit('Alan Agent')
+
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Alan Agent')
+    expect(within(dialog).getByLabelText('Role')).toBeEnabled()
+  })
+
+  test('the signed-in admin cannot change their own role, and saving refreshes the session', async () => {
+    patchSpy.mockResolvedValue({ data: { user: {} } } as AxiosResponse)
+    const { user, dialog } = await openEdit('Ada Admin')
+
+    expect(within(dialog).getByLabelText('Role')).toBeDisabled()
+    expect(within(dialog).getByText("You can't change your own role.")).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(patchSpy).toHaveBeenCalledWith('/users/u1', { name: 'Ada Admin', email: 'ada@example.com' })
+    expect(refetchSession).toHaveBeenCalledTimes(1)
   })
 })

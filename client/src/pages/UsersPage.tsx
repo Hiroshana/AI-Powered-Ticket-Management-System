@@ -1,7 +1,9 @@
 import { AlertCircleIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { authClient } from '@/lib/auth-client'
 import CreateUserDialog from '@/components/CreateUserDialog'
+import EditUserDialog from '@/components/EditUserDialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,19 +28,27 @@ type User = {
 
 const roleLabels = { ADMIN: 'Admin', AGENT: 'Agent' } as const
 
+// More breathing room than the shadcn default (px-2), with the outer columns
+// lined up with the card's edge padding.
+const tableSpacing =
+  '[&_td]:px-4 [&_th]:px-4 [&_td]:py-3 [&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-6'
+
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
 function UsersTableSkeleton() {
   return (
     <Card className="py-0" role="status" aria-busy="true">
       <span className="sr-only">Loading users…</span>
-      <Table aria-hidden="true">
+      <Table aria-hidden="true" className={tableSpacing}>
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
             <TableHead>Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead>Created</TableHead>
+            <TableHead>
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -56,6 +66,7 @@ function UsersTableSkeleton() {
               <TableCell>
                 <Skeleton className="h-4 w-24" />
               </TableCell>
+              <TableCell />
             </TableRow>
           ))}
         </TableBody>
@@ -65,6 +76,7 @@ function UsersTableSkeleton() {
 }
 
 export default function UsersPage() {
+  const { data: session, refetch: refetchSession } = authClient.useSession()
   const {
     data: users,
     isError,
@@ -96,13 +108,16 @@ export default function UsersPage() {
         <UsersTableSkeleton />
       ) : (
         <Card className="py-0">
-          <Table aria-label="Users">
+          <Table aria-label="Users" className={tableSpacing}>
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -117,6 +132,14 @@ export default function UsersPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {dateFormat.format(new Date(user.createdAt))}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <EditUserDialog
+                      user={user}
+                      isSelf={user.id === session?.user.id}
+                      // Refresh the header's name when admins edit themselves.
+                      onSaved={user.id === session?.user.id ? () => void refetchSession() : undefined}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

@@ -3,9 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AlertCircleIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
-import { isAxiosError } from 'axios'
 import { z } from 'zod'
 import { api } from '@/lib/api'
+import { apiErrorMessage } from '@/lib/api-error'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -43,18 +43,6 @@ type CreateUserValues = z.infer<typeof createUserSchema>
 
 const defaultValues: CreateUserValues = { name: '', email: '', password: '' }
 
-function errorMessage(error: unknown) {
-  if (isAxiosError<{ error?: string }>(error)) {
-    if (!error.response) {
-      return 'Could not reach the server. Check your connection and try again.'
-    }
-    if (error.response.status < 500 && error.response.data?.error) {
-      return error.response.data.error
-    }
-  }
-  return 'Something went wrong. Please try again.'
-}
-
 export default function CreateUserDialog() {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -71,7 +59,7 @@ export default function CreateUserDialog() {
       reset()
       await queryClient.invalidateQueries({ queryKey: ['users'] })
     },
-    onError: (error) => setError('root', { message: errorMessage(error) }),
+    onError: (error) => setError('root', { message: apiErrorMessage(error) }),
   })
 
   function handleOpenChange(next: boolean) {
