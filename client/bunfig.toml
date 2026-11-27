@@ -1,0 +1,3 @@
+[test]
+# happydom.ts must run first: Testing Library needs `document` when it loads.
+preload = ["./src/test/happydom.ts", "./src/test/setup.ts"]

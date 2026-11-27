@@ -22,6 +22,7 @@ Run from the repo root (Bun workspaces: `client`, `server`). Use `bun`, never np
 - `bun run typecheck` — type-check both packages
 - `bun run build` — build both packages
 - `cd server && bun test` — server tests (`bun:test`; needs the database running). Uses the **test** database (see below), so run `bun run db:test:prepare` once first
+- `cd client && bun test` (or `bun run test:client`) — client component tests (React Testing Library on happy-dom, `bun:test`; no server or DB needed). Use `cd client && bun run test:watch` while writing tests (re-runs on save)
 - `bun run test:e2e` — Playwright E2E tests (`cd e2e && bun run test:ui` for UI mode). First time: `cd e2e && bunx playwright install chromium`
 - `cd server && bun run db:test:prepare` — create/migrate the test DB, empty all tables, seed the `E2E_*` users
 - `cd server && bun run db:migrate -- --name <name>` — create + apply a migration after editing `prisma/schema.prisma`
@@ -29,7 +30,7 @@ Run from the repo root (Bun workspaces: `client`, `server`). Use `bun`, never np
 - `cd server && bun run db:studio` — browse data
 - Add a dependency: `cd client && bun add <pkg>` (or `server`)
 
-Before calling work done, run `bun run typecheck` and `cd server && bun test`.
+Before calling work done, run `bun run typecheck`, `cd server && bun test` and `cd client && bun test`.
 
 ## Architecture
 
@@ -55,6 +56,7 @@ Before calling work done, run `bun run typecheck` and `cd server && bun test`.
   - shadcn/ui (`components.json`: `base-nova` style = `nova` preset on Base UI (`@base-ui/react`, not Radix), neutral base color, CSS variables, lucide icons). Theme tokens live in `src/index.css`; style pages with semantic tokens (`bg-muted`, `text-muted-foreground`, `text-destructive`), not raw palette colors like `gray-500`.
   - Add components with `cd client && bunx --bun shadcn@latest add <name>` (they land in `src/components/ui/`; don't hand-edit them beyond small tweaks). Use `cn()` from `@/lib/utils` (backed by shadcn's `cn` package, which replaces clsx + tailwind-merge). The oxlint `only-export-components` warning in generated `ui/*.tsx` files is expected.
   - The `@/*` alias maps to `client/src/*` (set in `tsconfig.json`, `tsconfig.app.json` and `vite.config.ts`). TypeScript 7 removed `baseUrl`, so `paths` is used alone; don't add `baseUrl` even though the shadcn docs show it.
+  - Component tests: `*.test.tsx` next to the component (`src/pages/UsersPage.test.tsx` is the reference). `client/bunfig.toml` preloads happy-dom and jest-dom matchers (`src/test/`); tests are type-checked via `tsconfig.test.json` and excluded from `tsconfig.app.json`. Wrap renders in a fresh `QueryClient` with `retry: false` and stub requests with `spyOn(api, 'get')`. Query by role/label, not class names.
   - Forms: react-hook-form + zod (`zodResolver`), rendered with shadcn `Field` / `FieldLabel` / `FieldError` via `Controller` (`data-invalid` on `Field`, `aria-invalid` on the input). Show server errors with `setError('root', …)` in a destructive `Alert`. `src/pages/LoginPage.tsx` is the reference example.
 
 ## Authentication

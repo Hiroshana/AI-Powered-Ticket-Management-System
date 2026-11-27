@@ -8,6 +8,7 @@
     "dev:server": "bun --filter server dev",
     "build": "bun --filter '*' build",
     "typecheck": "bun --filter '*' typecheck",
+    "test:client": "bun --filter client test",
     "test:e2e": "bun --filter e2e test"
   }
 }
