@@ -1,5 +1,6 @@
 import { Link, Outlet, useNavigate } from 'react-router'
 import { authClient } from '../lib/auth-client.ts'
+import { queryClient } from '../lib/query-client.ts'
 
 export default function Layout() {
   const navigate = useNavigate()
@@ -7,6 +8,7 @@ export default function Layout() {
 
   async function handleSignOut() {
     await authClient.signOut()
+    queryClient.clear()
     navigate('/login', { replace: true })
   }
 

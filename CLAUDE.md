@@ -47,7 +47,8 @@ Before calling work done, run `bun run typecheck` and `cd server && bun test`.
 - **e2e/** — Playwright workspace (Chromium only). `playwright.config.ts` starts its own server on :3001 (after running `db:test:prepare`) and client on :5174 (Vite proxy pointed there via `API_PROXY_TARGET`), so it never reuses a dev server and can run alongside `bun run dev`. Data is reset on every run. Sign in with the seeded `E2E_ADMIN_*` / `E2E_AGENT_*` users from `.env.test`. Tests go in `e2e/tests/`.
 - **Creating users** — `createCredentialUser()` in `server/src/lib/users.ts` (used by the seed scripts).
 - **client/** — React 19 + Vite + Tailwind CSS v4 + React Router (declarative mode).
-  - Vite proxies `/api/*` to the server, so call `fetch('/api/...')` with relative URLs.
+  - Vite proxies `/api/*` to the server, so use the shared axios instance `api` from `@/lib/api` (`baseURL: '/api'`), e.g. `api.get('/users')`. Don't use `fetch` directly.
+  - Server data is loaded with TanStack Query (`useQuery` / `useMutation`) using the shared `queryClient` from `src/lib/query-client.ts` (provided in `main.tsx`). Pass the query's `signal` to axios (`queryFn: async ({ signal }) => (await api.get('/users', { signal })).data`). Don't load server data with `useEffect` + `useState`. Sign-out calls `queryClient.clear()` so cached data never leaks to the next user.
   - Routes are declared in `src/App.tsx` inside `<Layout>`; pages in `src/pages/`, shared UI in `src/components/`.
   - Import router APIs from `react-router` (not `react-router-dom`).
   - Tailwind v4 is configured via `@import "tailwindcss"` in `src/index.css` and the `@tailwindcss/vite` plugin — there is no `tailwind.config.js`.

@@ -7,7 +7,7 @@ Full-stack TypeScript monorepo run with [Bun](https://bun.sh) workspaces.
 | `client/` | React 19, Vite, Tailwind CSS v4, React Router      | http://localhost:5173 |
 | `server/` | Express 5 on the Bun runtime, Prisma 7 + PostgreSQL | http://localhost:3000 |
 
-In development, Vite proxies `/api/*` to the Express server, so the client calls `fetch('/api/...')` directly.
+In development, Vite proxies `/api/*` to the Express server, so the client calls it with relative URLs through the axios instance in `client/src/lib/api.ts`.
 
 ## Getting started
 

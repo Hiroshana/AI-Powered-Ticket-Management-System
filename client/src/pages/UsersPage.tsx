@@ -1,5 +1,6 @@
 import { AlertCircleIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,43 +27,27 @@ const roleLabels = { ADMIN: 'Admin', AGENT: 'Agent' } as const
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<User[] | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    async function load() {
-      try {
-        const res = await fetch('/api/users', { signal: controller.signal })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const body = (await res.json()) as { users: User[] }
-        setUsers(body.users)
-      } catch {
-        if (!controller.signal.aborted) setFailed(true)
-      }
-    }
-
-    void load()
-    return () => controller.abort()
-  }, [attempt])
-
-  function retry() {
-    setFailed(false)
-    setAttempt((n) => n + 1)
-  }
+  const {
+    data: users,
+    isError,
+    refetch,
+    isFetching,
+  } = useQuery({
+    queryKey: ['users'],
+    queryFn: async ({ signal }) =>
+      (await api.get<{ users: User[] }>('/users', { signal })).data.users,
+  })
 
   return (
     <section className="space-y-4">
       <h1 className="text-2xl font-bold">Users</h1>
-      {failed ? (
+      {isError && !isFetching ? (
         <div className="space-y-3">
           <Alert variant="destructive">
             <AlertCircleIcon />
             <AlertDescription>Could not load users.</AlertDescription>
           </Alert>
-          <Button variant="outline" onClick={retry}>
+          <Button variant="outline" onClick={() => void refetch()}>
             Try again
           </Button>
         </div>
