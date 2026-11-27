@@ -234,6 +234,15 @@ describe('UsersPage edit user dialog', () => {
     expect(screen.getByRole('button', { name: 'Edit Alan Agent' })).toBeInTheDocument()
   })
 
+  test('only agents have a delete button', async () => {
+    getSpy.mockReturnValue(ok({ users }))
+    renderPage()
+    await screen.findByRole('table', { name: 'Users' })
+
+    expect(screen.getByRole('button', { name: 'Delete Alan Agent' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete Ada Admin' })).not.toBeInTheDocument()
+  })
+
   test("another user's role can be changed", async () => {
     const { dialog } = await openEdit('Alan Agent')
 

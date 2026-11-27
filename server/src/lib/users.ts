@@ -57,3 +57,18 @@ export async function updateCredentialUser(
     if (revoke.length > 0) await ctx.internalAdapter.deleteSessions(revoke);
   }
 }
+
+// Soft-deletes a user: keeps the row (so history still points at it), frees
+// the email for reuse by replacing it with a tombstone, and signs the user out
+// everywhere. Sign-in is also blocked by the session hook in auth.ts.
+export async function softDeleteUser(userId: string) {
+  const ctx = await auth.$context;
+  const user = await ctx.internalAdapter.findUserById(userId);
+  if (!user) throw new Error(`User ${userId} not found`);
+  await ctx.internalAdapter.updateUser(userId, {
+    deletedAt: new Date(),
+    deletedEmail: user.email,
+    email: `deleted+${userId}@deleted.invalid`,
+  });
+  await ctx.internalAdapter.deleteUserSessions(userId);
+}

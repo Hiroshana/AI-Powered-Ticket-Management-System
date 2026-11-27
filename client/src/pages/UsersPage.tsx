@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { authClient } from '@/lib/auth-client'
 import CreateUserDialog from '@/components/CreateUserDialog'
+import DeleteUserDialog from '@/components/DeleteUserDialog'
 import EditUserDialog from '@/components/EditUserDialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -115,7 +116,7 @@ export default function UsersPage() {
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="w-12">
+                <TableHead className="w-24">
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -133,13 +134,15 @@ export default function UsersPage() {
                   <TableCell className="text-muted-foreground">
                     {dateFormat.format(new Date(user.createdAt))}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="space-x-1 text-right">
                     <EditUserDialog
                       user={user}
                       isSelf={user.id === session?.user.id}
                       // Refresh the header's name when admins edit themselves.
                       onSaved={user.id === session?.user.id ? () => void refetchSession() : undefined}
                     />
+                    {/* Admins can't be deleted (enforced on the server too). */}
+                    {user.role === 'AGENT' && <DeleteUserDialog user={user} />}
                   </TableCell>
                 </TableRow>
               ))}

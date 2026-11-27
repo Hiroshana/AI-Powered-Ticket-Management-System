@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Role } from "../generated/prisma/enums.ts";
 import { HttpError } from "../middleware/error.ts";
 import { prisma } from "../lib/prisma.ts";
-import { createCredentialUser, updateCredentialUser } from "../lib/users.ts";
+import { createCredentialUser, softDeleteUser, updateCredentialUser } from "../lib/users.ts";
 import { requireAdmin, requireAuth } from "../middleware/auth.ts";
 
 export const usersRouter = Router();
@@ -16,6 +16,7 @@ const publicUserFields = { id: true, name: true, email: true, role: true, create
 
 usersRouter.get("/", async (_req, res) => {
   const users = await prisma.user.findMany({
+    where: { deletedAt: null },
     select: publicUserFields,
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
@@ -68,6 +69,16 @@ usersRouter.post("/", async (req, res) => {
   res.status(201).json({ user });
 });
 
+// Soft-deleted users are treated as not found.
+async function findActiveUser(id: string) {
+  const user = await prisma.user.findFirst({
+    where: { id, deletedAt: null },
+    select: { role: true },
+  });
+  if (!user) throw new HttpError(404, "User not found");
+  return user;
+}
+
 usersRouter.patch("/:id", async (req, res) => {
   const parsed = updateUserSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -77,8 +88,7 @@ usersRouter.patch("/:id", async (req, res) => {
   const { id } = req.params;
   const isSelf = id === req.user!.id;
 
-  const existing = await prisma.user.findUnique({ where: { id }, select: { role: true } });
-  if (!existing) throw new HttpError(404, "User not found");
+  const existing = await findActiveUser(id);
 
   // Admins can't change their own role. Since only admins change roles, this
   // also guarantees at least one admin always remains.
@@ -92,4 +102,14 @@ usersRouter.patch("/:id", async (req, res) => {
   });
   const user = await prisma.user.findUniqueOrThrow({ where: { id }, select: publicUserFields });
   res.json({ user });
+});
+
+usersRouter.delete("/:id", async (req, res) => {
+  const { id } = req.params;
+  const existing = await findActiveUser(id);
+  // Admins (including the caller) can never be deleted.
+  if (existing.role === Role.ADMIN) throw new HttpError(403, "Admins can't be deleted");
+
+  await softDeleteUser(id);
+  res.status(204).end();
 });

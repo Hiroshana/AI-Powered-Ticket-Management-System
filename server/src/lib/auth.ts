@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { APIError } from "better-auth/api";
 import { prisma } from "./prisma.ts";
 
 // Reads BETTER_AUTH_SECRET and BETTER_AUTH_URL from the environment.
@@ -17,6 +18,27 @@ export const auth = betterAuth({
         required: false,
         defaultValue: "AGENT",
         input: false,
+      },
+      // Soft deletion (see softDeleteUser() in users.ts). Server-owned and
+      // never included in session or API responses.
+      deletedAt: { type: "date", required: false, input: false, returned: false },
+      deletedEmail: { type: "string", required: false, input: false, returned: false },
+    },
+  },
+  databaseHooks: {
+    session: {
+      create: {
+        // Deleted users can't sign in. Their email is already tombstoned, so
+        // this is defence in depth; it answers like a wrong password.
+        before: async (session) => {
+          const user = await prisma.user.findUnique({
+            where: { id: session.userId },
+            select: { deletedAt: true },
+          });
+          if (!user || user.deletedAt) {
+            throw new APIError("UNAUTHORIZED", { message: "Invalid email or password" });
+          }
+        },
       },
     },
   },

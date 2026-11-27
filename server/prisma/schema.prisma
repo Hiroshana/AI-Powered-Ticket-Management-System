@@ -21,6 +21,10 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
   role          Role      @default(AGENT)
+  // Soft deletion: set by softDeleteUser() in src/lib/users.ts. The email is
+  // replaced by a tombstone so it can be reused; the original is kept here.
+  deletedAt     DateTime?
+  deletedEmail  String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessions      Session[]

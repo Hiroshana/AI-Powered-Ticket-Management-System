@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import { createApp } from "./app.ts";
 import { Role } from "./generated/prisma/enums.ts";
 import { prisma } from "./lib/prisma.ts";
-import { createCredentialUser, updateCredentialUser } from "./lib/users.ts";
+import { createCredentialUser, softDeleteUser, updateCredentialUser } from "./lib/users.ts";
 
 const id = crypto.randomUUID();
 const password = "correct-horse-battery";
@@ -266,5 +266,110 @@ describe("PATCH /api/users/:id", () => {
     } finally {
       await updateCredentialUser(adminId, { password });
     }
+  });
+});
+
+describe("DELETE /api/users/:id", () => {
+  const victimEmail = `delete-${id}@example.com`;
+  const goneEmail = `delete-gone-${id}@example.com`;
+  let victimId: string;
+  let goneId: string;
+  let adminId: string;
+
+  beforeAll(async () => {
+    victimId = (await createCredentialUser({ email: victimEmail, name: "Delete Me", password, role: Role.AGENT })).id;
+    goneId = (await createCredentialUser({ email: goneEmail, name: "Already Gone", password, role: Role.AGENT })).id;
+    await softDeleteUser(goneId);
+    adminId = (await prisma.user.findUniqueOrThrow({ where: { email: admin.email } })).id;
+  });
+
+  afterAll(async () => {
+    const emails = [victimEmail, goneEmail];
+    await prisma.user.deleteMany({
+      where: { OR: [{ email: { in: emails } }, { deletedEmail: { in: emails } }] },
+    });
+  });
+
+  const deleteUser = (userId: string, cookie?: string) =>
+    fetch(`${baseUrl}/api/users/${userId}`, {
+      method: "DELETE",
+      headers: cookie ? { Cookie: cookie } : {},
+    });
+
+  const signInStatus = (email: string) =>
+    fetch(`${baseUrl}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ email, password }),
+    }).then((r) => r.status);
+
+  test("without a session returns 401", async () => {
+    expect((await deleteUser(victimId)).status).toBe(401);
+  });
+
+  test("as an agent returns 403 and deletes nothing", async () => {
+    const res = await deleteUser(victimId, await signIn(agent.email));
+    expect(res.status).toBe(403);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: victimId } });
+    expect(row.deletedAt).toBeNull();
+  });
+
+  test.each([["does-not-exist"], ["already-deleted"]])("returns 404 for %s users", async (which) => {
+    const target = which === "does-not-exist" ? "does-not-exist" : goneId;
+    const res = await deleteUser(target, await signIn(admin.email));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "User not found" });
+  });
+
+  test("an admin can't be deleted, including yourself", async () => {
+    const res = await deleteUser(adminId, await signIn(admin.email));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Admins can't be deleted" });
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: adminId } });
+    expect(row.deletedAt).toBeNull();
+    expect(row.email).toBe(admin.email);
+  });
+
+  test("soft-deletes an agent: signed out, can't sign in, hidden, not editable", async () => {
+    const victimCookie = await signIn(victimEmail);
+    const adminCookie = await signIn(admin.email);
+
+    const res = await deleteUser(victimId, adminCookie);
+    expect(res.status).toBe(204);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: victimId } });
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedEmail).toBe(victimEmail);
+    expect(row.email).not.toBe(victimEmail);
+
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { Cookie: victimCookie } })).status).toBe(401);
+    expect(await signInStatus(victimEmail)).toBe(401);
+    expect(await signInStatus(row.email)).toBe(401);
+
+    const list = (await (await listUsers(adminCookie)).json()) as { users: { id: string }[] };
+    expect(list.users.some((u) => u.id === victimId)).toBe(false);
+
+    const patch = await fetch(`${baseUrl}/api/users/${victimId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ name: "Back Again" }),
+    });
+    expect(patch.status).toBe(404);
+  });
+
+  test("a deleted user's email can be used for a new user", async () => {
+    const res = await fetch(`${baseUrl}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: await signIn(admin.email) },
+      body: JSON.stringify({ name: "Reused Email", email: goneEmail, password: "a-good-password" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  test("deleted fields never appear in the session user", async () => {
+    const res = await fetch(`${baseUrl}/api/me`, { headers: { Cookie: await signIn(admin.email) } });
+    const { user } = (await res.json()) as { user: Record<string, unknown> };
+    expect(user).not.toHaveProperty("deletedAt");
+    expect(user).not.toHaveProperty("deletedEmail");
   });
 });
