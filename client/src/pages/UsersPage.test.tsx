@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { api } from '@/lib/api'
@@ -152,5 +152,48 @@ describe('UsersPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load users.')
     expect(getSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('UsersPage create user dialog', () => {
+  async function openDialog() {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok({ users }))
+    renderPage()
+    await screen.findByRole('table', { name: 'Users' })
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'New user' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create user' })
+    return { user, dialog }
+  }
+
+  test('clicking "New user" shows the dialog', async () => {
+    const { dialog } = await openDialog()
+
+    expect(dialog).toBeVisible()
+    expect(within(dialog).getByLabelText('Name')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Email')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Password')).toBeInTheDocument()
+  })
+
+  test('pressing Escape hides the dialog', async () => {
+    const { user } = await openDialog()
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  test('clicking outside the dialog hides it', async () => {
+    const { user, dialog } = await openDialog()
+
+    // A click inside the dialog must not close it.
+    await user.click(within(dialog).getByLabelText('Name'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await user.click(document.body)
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

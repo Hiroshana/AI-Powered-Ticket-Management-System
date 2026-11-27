@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios'
 import { api } from '@/lib/api'
@@ -147,5 +147,193 @@ describe('CreateUserDialog', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(postSpy).not.toHaveBeenCalled()
+  })
+})
+
+const created = { data: { user: {} } } as AxiosResponse
+const submit = (user: ReturnType<typeof userEvent.setup>) =>
+  user.click(screen.getByRole('button', { name: 'Create user' }))
+
+describe('CreateUserDialog form validation', () => {
+  test('requires every field', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await openAndFill(user, { name: '', email: '', password: '' })
+    await submit(user)
+
+    expect(await screen.findByText('Name must be at least 3 characters')).toBeInTheDocument()
+    expect(screen.getByText('Email is required')).toBeInTheDocument()
+    expect(screen.getByText('Password must be at least 8 characters')).toBeInTheDocument()
+    for (const label of ['Name', 'Email', 'Password']) {
+      expect(screen.getByLabelText(label)).toHaveAttribute('aria-invalid', 'true')
+    }
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  test('accepts a name of exactly 3 characters and a password of exactly 8', async () => {
+    const user = userEvent.setup()
+    postSpy.mockResolvedValue(created)
+    renderDialog()
+
+    await openAndFill(user, { name: 'Ada', password: '12345678' })
+    await submit(user)
+
+    await waitFor(() =>
+      expect(postSpy).toHaveBeenCalledWith('/users', {
+        name: 'Ada',
+        email: 'new@example.com',
+        password: '12345678',
+      }),
+    )
+  })
+
+  test('rejects a password of 7 characters', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await openAndFill(user, { password: '1234567' })
+    await submit(user)
+
+    expect(await screen.findByText('Password must be at least 8 characters')).toBeInTheDocument()
+    expect(screen.queryByText('Name must be at least 3 characters')).not.toBeInTheDocument()
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  test('rejects values longer than the server allows', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await openAndFill(user, { name: '', password: '' })
+    await user.click(screen.getByLabelText('Name'))
+    await user.paste('a'.repeat(101))
+    await user.click(screen.getByLabelText('Password'))
+    await user.paste('p'.repeat(129))
+    await submit(user)
+
+    expect(await screen.findByText('Name must be at most 100 characters')).toBeInTheDocument()
+    expect(screen.getByText('Password must be at most 128 characters')).toBeInTheDocument()
+    expect(postSpy).not.toHaveBeenCalled()
+  })
+
+  test('does not trim the password', async () => {
+    // Spaces are valid password characters, so 8 spaces is a valid password.
+    const user = userEvent.setup()
+    postSpy.mockResolvedValue(created)
+    renderDialog()
+
+    await openAndFill(user, { password: '        ' })
+    await submit(user)
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    expect(postSpy.mock.calls[0]![1]).toMatchObject({ password: '        ' })
+  })
+
+  test('trims the email before sending it', async () => {
+    const user = userEvent.setup()
+    postSpy.mockResolvedValue(created)
+    renderDialog()
+
+    await openAndFill(user, { email: '  new@example.com  ' })
+    await submit(user)
+
+    await waitFor(() => expect(postSpy).toHaveBeenCalledTimes(1))
+    expect(postSpy.mock.calls[0]![1]).toMatchObject({ email: 'new@example.com' })
+  })
+
+  test('clears a field error as soon as the value becomes valid', async () => {
+    const user = userEvent.setup()
+    renderDialog()
+
+    await openAndFill(user, { name: 'Al' })
+    await submit(user)
+    expect(await screen.findByText('Name must be at least 3 characters')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Name'), 'a')
+
+    await waitFor(() =>
+      expect(screen.queryByText('Name must be at least 3 characters')).not.toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'false')
+  })
+})
+
+describe('CreateUserDialog submission', () => {
+  test('disables the buttons and keeps the dialog open while the request is pending', async () => {
+    const user = userEvent.setup()
+    let resolve!: (value: AxiosResponse) => void
+    postSpy.mockReturnValue(new Promise((r) => (resolve = r)))
+    renderDialog()
+
+    await openAndFill(user)
+    await submit(user)
+
+    expect(await screen.findByRole('button', { name: 'Creating…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+
+    // Escape must not dismiss the dialog mid-request.
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(postSpy).toHaveBeenCalledTimes(1)
+
+    // The request settles outside any user event, so wrap it in act() to let
+    // React finish the resulting close before asserting.
+    await act(async () => resolve({ data: { user: {} } } as AxiosResponse))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  test('shows a connection message when the server cannot be reached', async () => {
+    const user = userEvent.setup()
+    postSpy.mockRejectedValue(new AxiosError('Network Error', 'ERR_NETWORK'))
+    renderDialog()
+
+    await openAndFill(user)
+    await submit(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not reach the server. Check your connection and try again.',
+    )
+    expect(screen.getByRole('button', { name: 'Create user' })).toBeEnabled()
+  })
+
+  test('can retry after a server error', async () => {
+    const user = userEvent.setup()
+    postSpy.mockRejectedValueOnce(httpError(409, 'A user with this email already exists'))
+    postSpy.mockResolvedValueOnce(created)
+    renderDialog()
+
+    await openAndFill(user)
+    await submit(user)
+    await screen.findByRole('alert')
+
+    await user.clear(screen.getByLabelText('Email'))
+    await user.type(screen.getByLabelText('Email'), 'other@example.com')
+    await submit(user)
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(postSpy).toHaveBeenCalledTimes(2)
+    expect(postSpy.mock.calls[1]![1]).toMatchObject({ email: 'other@example.com' })
+  })
+
+  test('reopening after closing with errors shows a clean form', async () => {
+    const user = userEvent.setup()
+    postSpy.mockRejectedValue(httpError(409, 'A user with this email already exists'))
+    renderDialog()
+
+    await openAndFill(user)
+    await submit(user)
+    await screen.findByRole('alert')
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'New user' }))
+    await screen.findByRole('dialog')
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    for (const label of ['Name', 'Email', 'Password']) {
+      expect(screen.getByLabelText(label)).toHaveValue('')
+      expect(screen.getByLabelText(label)).toHaveAttribute('aria-invalid', 'false')
+    }
   })
 })
