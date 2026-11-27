@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Server } from "node:http";
 import { createApp } from "./app.ts";
+import { Role } from "./generated/prisma/enums.ts";
 import { prisma } from "./lib/prisma.ts";
 import { createCredentialUser } from "./lib/users.ts";
 
@@ -77,4 +78,68 @@ test("an admin who is demoted loses access on the next request", async () => {
   } finally {
     await setRole("ADMIN");
   }
+});
+
+describe("POST /api/users", () => {
+  const newEmail = `new-${id}@example.com`;
+  const valid = { name: "New Agent", email: newEmail, password: "a-good-password" };
+
+  afterAll(async () => {
+    await prisma.user.deleteMany({ where: { email: newEmail } });
+  });
+
+  const createUser = (body: unknown, cookie?: string) =>
+    fetch(`${baseUrl}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      body: JSON.stringify(body),
+    });
+
+  test("without a session returns 401", async () => {
+    expect((await createUser(valid)).status).toBe(401);
+  });
+
+  test("as an agent returns 403 and creates nothing", async () => {
+    const res = await createUser(valid, await signIn(agent.email));
+    expect(res.status).toBe(403);
+    expect(await prisma.user.findUnique({ where: { email: newEmail } })).toBeNull();
+  });
+
+  test.each([
+    [{ ...valid, name: "Al" }, "Name must be at least 3 characters"],
+    [{ ...valid, name: "   Al   " }, "Name must be at least 3 characters"],
+    [{ ...valid, password: "short" }, "Password must be at least 8 characters"],
+    [{ ...valid, email: "not-an-email" }, "Enter a valid email address"],
+    [{ name: valid.name, email: valid.email }, undefined],
+  ])("rejects invalid input with 400 (%#)", async (body, message) => {
+    const res = await createUser(body, await signIn(admin.email));
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    if (message) expect(json.error).toBe(message);
+    expect(await prisma.user.findUnique({ where: { email: newEmail } })).toBeNull();
+  });
+
+  test("as an admin creates an agent who can sign in", async () => {
+    const res = await createUser(
+      { ...valid, name: "  New Agent  ", email: newEmail.toUpperCase() },
+      await signIn(admin.email),
+    );
+    expect(res.status).toBe(201);
+    const { user } = (await res.json()) as { user: Record<string, unknown> };
+    expect(user).toMatchObject({ name: "New Agent", email: newEmail, role: Role.AGENT });
+    expect(Object.keys(user).sort()).toEqual(["createdAt", "email", "id", "name", "role"]);
+
+    const signInRes = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ email: newEmail, password: valid.password }),
+    });
+    expect(signInRes.status).toBe(200);
+  });
+
+  test("a duplicate email returns 409", async () => {
+    const res = await createUser(valid, await signIn(admin.email));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "A user with this email already exists" });
+  });
 });

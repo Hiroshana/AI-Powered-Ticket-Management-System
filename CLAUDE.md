@@ -91,4 +91,4 @@ Better Auth (email/password only), configured in `server/src/lib/auth.ts`. Befor
 - Use `import type` for type-only imports (`verbatimModuleSyntax` is on).
 - Security review: ask for the `security-reviewer` subagent (`.claude/agents/security-reviewer.md`). It only reports; it doesn't fix.
 - E2E tests: ask for the `e2e-tester` subagent (`.claude/agents/e2e-tester.md`). It writes, runs and fixes Playwright tests in `e2e/`; it reports app bugs but doesn't fix them.
-- Planned but not yet set up: Ticket model, creating/editing/deleting users (`/users` and `GET /api/users` only list them), Claude API, email provider. Fetch their docs via Context7 when implementing them.
+- Planned but not yet set up: Ticket model, editing/deleting users (`/users` lists users and creates agents via `POST /api/users`), Claude API, email provider. Fetch their docs via Context7 when implementing them.

@@ -1,10 +1,11 @@
+import type { Role } from "../generated/prisma/enums.ts";
 import { auth } from "./auth.ts";
 
 type NewUser = {
   email: string;
   name: string;
   password: string;
-  role: "ADMIN" | "AGENT";
+  role: Role;
 };
 
 // Creates a user with an email/password account. Public sign-up is disabled,

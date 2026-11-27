@@ -1,6 +1,7 @@
 import { AlertCircleIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import CreateUserDialog from '@/components/CreateUserDialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -77,7 +78,10 @@ export default function UsersPage() {
 
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-bold">Users</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold">Users</h1>
+        <CreateUserDialog />
+      </div>
       {isError && !isFetching ? (
         <div className="space-y-3">
           <Alert variant="destructive">
