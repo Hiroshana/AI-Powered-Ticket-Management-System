@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -25,6 +26,42 @@ type User = {
 const roleLabels = { ADMIN: 'Admin', AGENT: 'Agent' } as const
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
+
+function UsersTableSkeleton() {
+  return (
+    <Card className="py-0" role="status" aria-busy="true">
+      <span className="sr-only">Loading users…</span>
+      <Table aria-hidden="true">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+            <TableHead>Email</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead>Created</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: 5 }, (_, i) => (
+            <TableRow key={i}>
+              <TableCell>
+                <Skeleton className="h-4 w-32" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-48" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-14 rounded-full" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-24" />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  )
+}
 
 export default function UsersPage() {
   const {
@@ -52,9 +89,7 @@ export default function UsersPage() {
           </Button>
         </div>
       ) : !users ? (
-        <p role="status" className="text-muted-foreground">
-          Loading users…
-        </p>
+        <UsersTableSkeleton />
       ) : (
         <Card className="py-0">
           <Table aria-label="Users">

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 
 type Health = { status: string; database: string; timestamp: string }
@@ -15,7 +16,12 @@ export default function HomePage() {
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <p className="text-sm text-gray-500">API status</p>
         {error && <p className="text-red-600">Unreachable: {error.message}</p>}
-        {!error && !health && <p className="text-gray-400">Checking…</p>}
+        {!error && !health && (
+          <div role="status" aria-busy="true" className="py-0.5">
+            <span className="sr-only">Checking…</span>
+            <Skeleton className="h-5 w-72" />
+          </div>
+        )}
         {health && (
           <p className="text-green-700">
             {health.status} (database: {health.database}) —{" "}
