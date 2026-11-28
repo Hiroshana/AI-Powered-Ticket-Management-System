@@ -5,6 +5,7 @@ import { auth } from "./lib/auth.ts";
 import { healthRouter } from "./routes/health.ts";
 import { meRouter } from "./routes/me.ts";
 import { usersRouter } from "./routes/users.ts";
+import { inboundEmailRouter } from "./routes/inbound-email.ts";
 import { errorHandler, notFound } from "./middleware/error.ts";
 
 export function createApp() {
@@ -19,6 +20,9 @@ export function createApp() {
 
   // Better Auth must be mounted before express.json() — it reads the raw body.
   app.all("/api/auth/*splat", toNodeHandler(auth));
+
+  // Mounted before the global express.json() so it can use its own (larger) body limit.
+  app.use("/api/inbound/email", inboundEmailRouter);
 
   app.use(express.json());
 
