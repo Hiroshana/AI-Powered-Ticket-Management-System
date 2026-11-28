@@ -225,6 +225,41 @@ test.describe('filters', () => {
     await expect(page.getByText(NO_MATCHES, { exact: true })).toBeVisible()
   })
 
+  test('search finds a ticket by subject, sender and number, and survives a reload', async ({
+    page,
+    deliver,
+  }) => {
+    const email = newEmail()
+    const other = newEmail()
+    const id = await expectTicket(await deliver(email), 201)
+    await expectTicket(await deliver(other), 201)
+    await page.goto(LIST)
+    await expectRowVisible(page, other)
+    const search = page.getByLabel('Search', { exact: true })
+
+    // Case-insensitive.
+    const query = email.subject.toUpperCase()
+    const request = page.waitForRequest(isTicketsRequest({ q: query, page: '1' }))
+    await search.fill(query)
+    await request
+    await expect(page).toHaveURL(`${LIST}&${new URLSearchParams({ q: query })}`)
+    await expectRowVisible(page, email)
+    await expect(ticketRow(page, other.subject)).toHaveCount(0)
+
+    await page.reload()
+    await expect(search).toHaveValue(query)
+    await expectRowVisible(page, email)
+
+    for (const query of [email.from, email.fromName, `#${id}`]) {
+      await search.fill(query)
+      await expectRowVisible(page, email)
+      await expect(ticketRow(page, other.subject)).toHaveCount(0)
+    }
+
+    await search.fill(`no such ticket ${crypto.randomUUID()}`)
+    await expect(page.getByText('No tickets match your search.', { exact: true })).toBeVisible()
+  })
+
   test('opening a filtered URL directly applies the filters', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)

@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { AlertCircleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from 'lucide-react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
+import { AlertCircleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SearchIcon } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   createColumnHelper,
@@ -31,6 +31,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -125,6 +126,7 @@ const noTickets: TicketListItem[] = []
 // defaults are left out of the URL.
 function useTicketFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const q = searchParams.get('q')?.trim() || undefined
   const rawStatus = searchParams.get('status')
   const rawCategory = searchParams.get('category')
   const rawSort = searchParams.get('sort')
@@ -155,7 +157,7 @@ function useTicketFilters() {
     })
   }
 
-  return { status, category, sort, order, page, pageSize, update }
+  return { q, status, category, sort, order, page, pageSize, update }
 }
 
 function TicketsTableSkeleton() {
@@ -204,16 +206,65 @@ function TicketsTableSkeleton() {
 
 const ariaSort = { asc: 'ascending', desc: 'descending' } as const
 
+const SEARCH_DELAY_MS = 300
+
+// Search box for the `q` URL param. Typing updates the URL (and so the request)
+// once the user pauses, not on every keystroke.
+function TicketSearch({ value, onSearch }: { value: string; onSearch: (text: string) => void }) {
+  const [text, setText] = useState(value)
+
+  // Follow URL changes made elsewhere (back/forward). Skip ones that only trim
+  // what's being typed, so a trailing space isn't wiped mid-word.
+  const [lastValue, setLastValue] = useState(value)
+  if (value !== lastValue) {
+    setLastValue(value)
+    if (value !== text.trim()) setText(value)
+  }
+
+  const search = useEffectEvent((next: string) => onSearch(next))
+  useEffect(() => {
+    const next = text.trim()
+    if (next === value) return
+    const timer = setTimeout(() => search(next), SEARCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [text, value])
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="ticket-search">Search</Label>
+      <div className="relative">
+        <SearchIcon
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          id="ticket-search"
+          type="search"
+          className="w-72 pl-8"
+          placeholder="Subject, sender or ticket #"
+          maxLength={200}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          // Enter searches right away.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onSearch(text.trim())
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function TicketsPage() {
-  const { status, category, sort, order, page, pageSize, update } = useTicketFilters()
-  const filtered = status !== undefined || category !== undefined
+  const { q, status, category, sort, order, page, pageSize, update } = useTicketFilters()
+  const filtered = q !== undefined || status !== undefined || category !== undefined
 
   const { data, isError, refetch, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ['tickets', { status, category, sort, order, page, pageSize }],
+    queryKey: ['tickets', { q, status, category, sort, order, page, pageSize }],
     queryFn: async ({ signal }) =>
       (
         await api.get<TicketListResponse>('/tickets', {
-          params: { status, category, sort, order, page, pageSize },
+          params: { q, status, category, sort, order, page, pageSize },
           signal,
         })
       ).data,
@@ -255,6 +306,7 @@ export default function TicketsPage() {
       <h1 className="text-2xl font-bold">Tickets</h1>
 
       <div className="flex flex-wrap items-end gap-4">
+        <TicketSearch value={q ?? ''} onSearch={(text) => update({ q: text, page: undefined })} />
         <div className="space-y-1.5">
           <Label htmlFor="ticket-status">Status</Label>
           <NativeSelect
@@ -305,7 +357,9 @@ export default function TicketsPage() {
             {total > 0
               ? 'No tickets on this page.'
               : filtered
-                ? 'No tickets match these filters.'
+                ? q !== undefined
+                  ? 'No tickets match your search.'
+                  : 'No tickets match these filters.'
                 : 'No tickets yet.'}
           </p>
           {total > 0 && (

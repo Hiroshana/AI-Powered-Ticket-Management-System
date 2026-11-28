@@ -222,6 +222,46 @@ describe('TicketsPage', () => {
     expect(currentUrl()).toBe('/tickets?category=TECHNICAL_QUESTION')
   })
 
+  test('searching waits for a pause, then requests page 1 and updates the URL', async () => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response({ total: 60, page: 3 })))
+
+    renderPage('/tickets?status=OPEN&page=3')
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    await user.type(screen.getByLabelText('Search'), '  refund ')
+    await waitFor(() => expect(lastParams()).toMatchObject({ q: 'refund', status: 'OPEN', page: 1 }))
+    expect(currentUrl()).toBe('/tickets?status=OPEN&q=refund')
+    // One request for the finished text, not one per keystroke.
+    const searched = getSpy.mock.calls
+      .map(([, config]) => (config?.params as { q?: string } | undefined)?.q)
+      .filter(Boolean)
+    expect(searched).toEqual(['refund'])
+    // The box keeps what was typed (the URL holds the trimmed text).
+    expect(screen.getByLabelText('Search')).toHaveValue('  refund ')
+
+    await user.clear(screen.getByLabelText('Search'))
+    await waitFor(() => expect(currentUrl()).toBe('/tickets?status=OPEN'))
+    expect(lastParams()).toMatchObject({ q: undefined })
+  })
+
+  test('sends the search from the URL and shows it in the box', async () => {
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage('/tickets?q=Kim')
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    expect(lastParams()).toMatchObject({ q: 'Kim', page: 1 })
+    expect(screen.getByLabelText('Search')).toHaveValue('Kim')
+  })
+
+  test('says no tickets match the search when it finds nothing', async () => {
+    getSpy.mockReturnValue(ok(response({ tickets: [], total: 0 })))
+
+    renderPage('/tickets?q=nothing')
+    expect(await screen.findByText('No tickets match your search.')).toBeInTheDocument()
+  })
+
   test('defaults to 10 rows per page and offers 10, 15, 20, 25, 50 and 100', async () => {
     getSpy.mockReturnValue(ok(response()))
 

@@ -42,7 +42,32 @@ function orderByFor(sort: SortKey, order: SortOrder): Prisma.TicketOrderByWithRe
   return sort === "id" ? [primary] : [primary, { id: order }];
 }
 
+// Free-text search: case-insensitive substring match on subject, sender name and
+// sender email, plus an exact ticket number when the text is a number (a leading
+// "#" is allowed).
+function searchWhere(q: string | undefined): Prisma.TicketWhereInput {
+  if (!q) return {};
+  // Prisma passes `contains` straight into ILIKE without escaping, so "%" and
+  // "_" would be wildcards. Escape them (and the escape character itself).
+  const pattern = q.replace(/[\\%_]/g, "\\$&");
+  const text = { contains: pattern, mode: "insensitive" } as const;
+  const number = /^#?\d{1,9}$/.test(q) ? Number(q.replace("#", "")) : undefined;
+  return {
+    OR: [
+      { subject: text },
+      { fromName: text },
+      { fromEmail: text },
+      ...(number !== undefined ? [{ id: number }] : []),
+    ],
+  };
+}
+
 const listQuerySchema = z.object({
+  q: z
+    .string("Search must be text")
+    .trim()
+    .max(200, "Search must be at most 200 characters")
+    .optional(),
   status: z.enum(TicketStatus, "Status must be OPEN, RESOLVED or CLOSED").optional(),
   category: z
     .enum(TicketCategory, "Category must be GENERAL_QUESTION, TECHNICAL_QUESTION or REFUND_REQUEST")
@@ -63,8 +88,8 @@ ticketsRouter.get("/", async (req, res) => {
   if (!parsed.success) {
     throw new HttpError(400, parsed.error.issues[0]?.message ?? "Invalid request");
   }
-  const { status, category, page, pageSize, sort, order } = parsed.data;
-  const where = { status, category };
+  const { q, status, category, page, pageSize, sort, order } = parsed.data;
+  const where: Prisma.TicketWhereInput = { status, category, ...searchWhere(q) };
 
   const [tickets, total] = await prisma.$transaction([
     prisma.ticket.findMany({

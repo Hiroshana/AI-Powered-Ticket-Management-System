@@ -249,3 +249,63 @@ test.each([
   expect(res.status).toBe(400);
   expect(await res.json()).toEqual({ error });
 });
+
+test("q searches subject, sender name and sender email, case-insensitively", async () => {
+  // Every seed's subject and email contain this run's id.
+  const byId = await listAll(`q=${id}`);
+  expect(mine(byId)).toEqual(seeds.map((s) => s.subject));
+  expect(byId.total).toBe(seeds.length);
+
+  expect(mine(await listAll(`q=${encodeURIComponent(`TIE-A ${id}`)}`))).toEqual(["tie-a"]);
+  expect(mine(await listAll(`q=${encodeURIComponent(sender.toUpperCase())}`))).toEqual(seeds.map((s) => s.subject));
+  // fromName only: "amy" isn't in any of this file's subjects or emails.
+  expect(mine(await listAll("q=amy"))).toEqual(["oldest"]);
+});
+
+test("q matches a ticket number, with or without #", async () => {
+  const oldest = await prisma.ticket.findFirstOrThrow({ where: { subject: `oldest ${id}` } });
+  for (const q of [String(oldest.id), `%23${oldest.id}`]) {
+    const body = await listOk(`?q=${q}`);
+    expect(body.tickets.map((t) => t.id)).toContain(oldest.id);
+  }
+});
+
+test("q combines with filters, sorting and pagination", async () => {
+  const body = await listAll(`q=${id}&status=OPEN&sort=subject&order=asc`);
+  expect(mine(body)).toEqual(["newest", "oldest", "tie-a"]);
+  expect(body.total).toBe(3);
+
+  const second = await listOk(`?q=${id}&pageSize=2&page=2`);
+  expect(mine(second)).toEqual(["tie-a", "middle"]);
+  expect(second.total).toBe(seeds.length);
+});
+
+test("q treats LIKE wildcards and backslashes literally", async () => {
+  const subjects = ["50% off", "a_b", "back\\slash"].map((s) => `${s} ${id}`);
+  await prisma.ticket.createMany({
+    data: subjects.map((subject) => ({ subject, body: "Body", fromEmail: sender, fromName: "Wildcard" })),
+  });
+  const found = async (q: string) =>
+    (await listAll(`q=${encodeURIComponent(q)}`)).tickets
+      .filter((t) => t.subject.endsWith(id))
+      .map((t) => t.subject.replace(` ${id}`, ""));
+  try {
+    expect(await found("%")).toEqual(["50% off"]);
+    expect(await found("_")).toEqual(["a_b"]);
+    expect(await found("\\")).toEqual(["back\\slash"]);
+    expect(await found("a_")).toEqual(["a_b"]);
+  } finally {
+    await prisma.ticket.deleteMany({ where: { subject: { in: subjects } } });
+  }
+});
+
+test("a blank q is ignored", async () => {
+  const [all, blank] = await Promise.all([listOk(), listOk("?q=%20%20")]);
+  expect(blank.total).toBe(all.total);
+});
+
+test("rejects a q longer than 200 characters", async () => {
+  const res = await list(`?q=${"a".repeat(201)}`);
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error: "Search must be at most 200 characters" });
+});
