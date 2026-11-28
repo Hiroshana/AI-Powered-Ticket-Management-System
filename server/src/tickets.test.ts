@@ -460,11 +460,65 @@ test("rejects a deleted user as assignee", async () => {
   }
 });
 
-test.each([{}, { assigneeId: 5 }, { assigneeId: "" }])("rejects the body %j", async (body) => {
+test.each([
+  [{}, "Nothing to update"],
+  [{ assigneeId: 5 }, "Assignee must be a user id or null"],
+  [{ assigneeId: "" }, "Assignee must be a user id or null"],
+  [{ status: "PENDING" }, "Status must be OPEN, RESOLVED or CLOSED"],
+  [{ status: null }, "Status must be OPEN, RESOLVED or CLOSED"],
+  [{ category: "BILLING" }, "Category must be GENERAL_QUESTION, TECHNICAL_QUESTION, REFUND_REQUEST or null"],
+])("rejects the body %j", async (body, error) => {
   const ticket = await scratchTicket();
   const res = await patchTicket(ticket.id, body);
   expect(res.status).toBe(400);
-  expect(await res.json()).toEqual({ error: "Assignee must be a user id or null" });
+  expect(await res.json()).toEqual({ error });
+});
+
+test("updates the status", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { status: "RESOLVED" });
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { status: string }).status).toBe("RESOLVED");
+  const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+  expect(row.status).toBe("RESOLVED");
+});
+
+test("sets and clears the category", async () => {
+  const ticket = await scratchTicket();
+  const set = await patchTicket(ticket.id, { category: "TECHNICAL_QUESTION" });
+  expect(set.status).toBe(200);
+  expect(((await set.json()) as { category: unknown }).category).toBe("TECHNICAL_QUESTION");
+
+  const cleared = await patchTicket(ticket.id, { category: null });
+  expect(cleared.status).toBe(200);
+  expect(((await cleared.json()) as { category: unknown }).category).toBeNull();
+});
+
+test("only the fields sent are changed", async () => {
+  const ticket = await scratchTicket();
+  await patchTicket(ticket.id, { assigneeId: agentId, category: "REFUND_REQUEST" });
+  await patchTicket(ticket.id, { status: "CLOSED" });
+  const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+  expect(row).toMatchObject({ status: "CLOSED", category: "REFUND_REQUEST", assigneeId: agentId });
+});
+
+test("updates several fields at once", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { status: "RESOLVED", category: "GENERAL_QUESTION", assigneeId: adminId });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({
+    status: "RESOLVED",
+    category: "GENERAL_QUESTION",
+    assignee: { id: adminId, name: admin.name },
+  });
+});
+
+test("an invalid assignee leaves the other fields unchanged", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { status: "CLOSED", assigneeId: "no-such-user" });
+  expect(res.status).toBe(400);
+  const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+  expect(row.status).toBe("OPEN");
 });
 
 test("PATCH a missing ticket returns 404", async () => {

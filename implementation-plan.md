@@ -29,10 +29,9 @@
 - [ ] Implement create ticket API endpoint
 - [x] Implement list tickets API endpoint (with filtering by status and category, sorting)
 - [x] Implement get ticket API endpoint
-- [x] Implement update ticket API endpoint: assign agent (`PATCH /api/tickets/:id` with `assigneeId`)
-- [ ] Extend the update ticket endpoint to change status
+- [x] Implement update ticket API endpoint (change status and category, assign agent: `PATCH /api/tickets/:id`)
 - [x] Create ticket list page with filtering and sorting
-- [x] Create ticket detail page (assignee can be changed; status editing comes with the status update)
+- [x] Create ticket detail page (status, category and assignee are editable)
 
 ## Phase 5: AI Features
 

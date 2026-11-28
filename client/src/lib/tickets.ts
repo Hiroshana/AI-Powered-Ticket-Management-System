@@ -90,5 +90,10 @@ export const listSearchFrom = (state: unknown): string => {
 export type Assignee = { id: string; name: string }
 export type AssigneesResponse = { users: Assignee[] }
 
-// PATCH /api/tickets/:id body. `assigneeId: null` unassigns.
-export type TicketUpdate = { assigneeId: string | null }
+// PATCH /api/tickets/:id body: any subset of these fields (at least one).
+// `assigneeId: null` unassigns; `category: null` clears the category.
+export type TicketUpdate = Partial<{
+  assigneeId: string | null
+  status: TicketStatus
+  category: TicketCategory | null
+}>

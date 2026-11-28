@@ -150,10 +150,24 @@ ticketsRouter.get("/:id", async (req, res) => {
   res.json(ticket);
 });
 
-// `assigneeId: null` unassigns. Keep in sync with the client's TicketUpdate type.
-const updateTicketSchema = z.object({
-  assigneeId: z.string("Assignee must be a user id or null").min(1, "Assignee must be a user id or null").max(100).nullable(),
-});
+// Every field is optional, but at least one must be sent. `assigneeId: null`
+// unassigns and `category: null` clears the category. Keep in sync with the
+// client's TicketUpdate type.
+const updateTicketSchema = z
+  .object({
+    assigneeId: z
+      .string("Assignee must be a user id or null")
+      .min(1, "Assignee must be a user id or null")
+      .max(100)
+      .nullable()
+      .optional(),
+    status: z.enum(TicketStatus, "Status must be OPEN, RESOLVED or CLOSED").optional(),
+    category: z
+      .enum(TicketCategory, "Category must be GENERAL_QUESTION, TECHNICAL_QUESTION, REFUND_REQUEST or null")
+      .nullable()
+      .optional(),
+  })
+  .refine((data) => Object.values(data).some((v) => v !== undefined), "Nothing to update");
 
 ticketsRouter.patch("/:id", async (req, res) => {
   const id = parseTicketId(req.params.id);
@@ -161,11 +175,11 @@ ticketsRouter.patch("/:id", async (req, res) => {
   if (!parsed.success) {
     throw new HttpError(400, parsed.error.issues[0]?.message ?? "Invalid request");
   }
-  const { assigneeId } = parsed.data;
+  const { assigneeId, status, category } = parsed.data;
 
   const ticket = await prisma.$transaction(async (tx) => {
     // Only active (not soft-deleted) users can be assigned.
-    if (assigneeId !== null) {
+    if (assigneeId) {
       const assignee = await tx.user.findFirst({
         where: { id: assigneeId, deletedAt: null },
         select: { id: true },
@@ -174,7 +188,12 @@ ticketsRouter.patch("/:id", async (req, res) => {
     }
     const existing = await tx.ticket.findUnique({ where: { id }, select: { id: true } });
     if (!existing) throw new HttpError(404, "Ticket not found");
-    return tx.ticket.update({ where: { id }, data: { assigneeId }, select: ticketDetailFields });
+    // Undefined fields are left unchanged by Prisma.
+    return tx.ticket.update({
+      where: { id },
+      data: { assigneeId, status, category },
+      select: ticketDetailFields,
+    });
   });
 
   res.json(ticket);

@@ -86,10 +86,10 @@ describe('TicketDetailPage', () => {
     renderPage()
     await screen.findByRole('heading', { name: '#42 Refund for course' })
 
-    expect(screen.getByText('Open')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveDisplayValue('Open')
     expect(screen.getByText('Sam Student')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'sam@example.com' })).toHaveAttribute('href', 'mailto:sam@example.com')
-    expect(screen.getByText('Refund Request')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveDisplayValue('Refund Request')
     expect(screen.getByRole('combobox', { name: 'Assignee' })).toHaveDisplayValue('Alan Agent')
     // The HTML in the body is shown literally, not rendered.
     expect(screen.getByText(/I would like a refund\./).textContent).toBe(ticket.body)
@@ -100,7 +100,7 @@ describe('TicketDetailPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Uncategorized')).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: 'Category' })).toHaveDisplayValue('Uncategorized')
     expect(screen.getByRole('combobox', { name: 'Assignee' })).toHaveDisplayValue('Unassigned')
   })
 
@@ -214,6 +214,78 @@ describe('TicketDetailPage', () => {
       await waitFor(() => expect(select).toBeEnabled())
 
       expect(select).toHaveDisplayValue('Old Agent')
+    })
+  })
+
+  describe('status and category', () => {
+    test('changing the status saves it and updates the badge', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      patchSpy.mockReturnValue(ok({ ...ticket, status: 'RESOLVED' }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Status' })
+      expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Open',
+        'Resolved',
+        'Closed',
+      ])
+
+      await user.selectOptions(select, 'Resolved')
+
+      expect(patchSpy).toHaveBeenCalledWith('/tickets/42', { status: 'RESOLVED' })
+      await waitFor(() => expect(select).toBeEnabled())
+      expect(select).toHaveDisplayValue('Resolved')
+      // The heading badge reflects the saved status.
+      const heading = screen.getByRole('heading', { name: '#42 Refund for course' })
+      expect(heading.parentElement).toHaveTextContent('Resolved')
+    })
+
+    test('changing the category saves it', async () => {
+      getSpy.mockImplementation(respond(() => ok({ ...ticket, category: null })))
+      patchSpy.mockReturnValue(ok({ ...ticket, category: 'TECHNICAL_QUESTION' }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Category' })
+      expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Uncategorized',
+        'General Question',
+        'Technical Question',
+        'Refund Request',
+      ])
+
+      await user.selectOptions(select, 'Technical Question')
+
+      expect(patchSpy).toHaveBeenCalledWith('/tickets/42', { category: 'TECHNICAL_QUESTION' })
+      await waitFor(() => expect(select).toHaveDisplayValue('Technical Question'))
+    })
+
+    test('picking "Uncategorized" sends category: null', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      patchSpy.mockReturnValue(ok({ ...ticket, category: null }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Category' })
+      await user.selectOptions(select, 'Uncategorized')
+
+      expect(patchSpy).toHaveBeenCalledWith('/tickets/42', { category: null })
+      await waitFor(() => expect(select).toHaveDisplayValue('Uncategorized'))
+    })
+
+    test('a failed save shows the error only under that field and keeps the old value', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      patchSpy.mockImplementation(() => fail(500))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Status' })
+      await user.selectOptions(select, 'Closed')
+
+      expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument()
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+      expect(select).toHaveDisplayValue('Open')
     })
   })
 })

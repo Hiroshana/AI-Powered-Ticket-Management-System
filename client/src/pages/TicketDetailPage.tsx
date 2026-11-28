@@ -5,17 +5,32 @@ import { isAxiosError } from 'axios'
 import { Link, useLocation, useParams } from 'react-router'
 import { api } from '@/lib/api'
 import {
+  isTicketCategory,
+  isTicketStatus,
   listSearchFrom,
   ticketCategoryLabels,
   ticketStatusLabels,
   type TicketDetail,
 } from '@/lib/tickets'
 import TicketAssigneeSelect from '@/components/TicketAssigneeSelect'
+import TicketFieldSelect, { type SelectOption } from '@/components/TicketFieldSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+
+const statusOptions: SelectOption[] = Object.entries(ticketStatusLabels).map(([value, label]) => ({
+  value,
+  label,
+}))
+const categoryOptions: SelectOption[] = [
+  { value: '', label: 'Uncategorized' },
+  ...Object.entries(ticketCategoryLabels).map(([value, label]) => ({ value, label })),
+]
+
+// Main column plus a fixed-width side column for the editable fields.
+const columns = 'grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -32,21 +47,31 @@ function TicketDetailSkeleton() {
   return (
     <div role="status" aria-busy="true" className="space-y-4">
       <span className="sr-only">Loading ticket…</span>
-      <Skeleton className="h-8 w-96" />
-      <Card>
-        <CardContent className="grid grid-cols-2 gap-6 md:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-9 w-32" />
-          ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-4 w-2/3" />
-        </CardContent>
-      </Card>
+      <Skeleton className="h-8 w-96 max-w-full" />
+      <div className={columns}>
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <Skeleton className="h-9 w-40" />
+              <Skeleton className="h-9 w-32" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </CardContent>
+          </Card>
+        </div>
+        <Card>
+          <CardContent className="space-y-5">
+            {Array.from({ length: 3 }, (_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
@@ -105,37 +130,62 @@ export default function TicketDetailPage() {
             </Badge>
           </div>
 
-          <Card>
-            <CardContent>
-              <dl className="grid grid-cols-2 gap-6 md:grid-cols-4">
-                <Detail label="From">
-                  <div>{ticket.fromName}</div>
-                  <a href={`mailto:${ticket.fromEmail}`} className="text-muted-foreground hover:underline">
-                    {ticket.fromEmail}
-                  </a>
-                </Detail>
-                <Detail label="Category">
-                  {ticket.category ? (
-                    ticketCategoryLabels[ticket.category]
-                  ) : (
-                    <span className="text-muted-foreground">Uncategorized</span>
-                  )}
-                </Detail>
-                <TicketAssigneeSelect ticket={ticket} />
-                <Detail label="Received">{dateFormat.format(new Date(ticket.createdAt))}</Detail>
-              </dl>
-            </CardContent>
-          </Card>
+          {/* Two columns on large screens: the email on the left, the editable
+              fields on the right. Stacked (email first) on smaller screens. */}
+          <div className={columns}>
+            <div className="min-w-0 space-y-4">
+              <Card>
+                <CardContent>
+                  <dl className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                    <Detail label="From">
+                      <div>{ticket.fromName}</div>
+                      <a
+                        href={`mailto:${ticket.fromEmail}`}
+                        className="break-all text-muted-foreground hover:underline"
+                      >
+                        {ticket.fromEmail}
+                      </a>
+                    </Detail>
+                    <Detail label="Received">{dateFormat.format(new Date(ticket.createdAt))}</Detail>
+                  </dl>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Message</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Plain text from the email; React escapes it. */}
-              <p className="text-sm break-words whitespace-pre-wrap">{ticket.body}</p>
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Message</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {/* Plain text from the email; React escapes it. */}
+                  <p className="text-sm break-words whitespace-pre-wrap">{ticket.body}</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card>
+              <CardContent>
+                <dl className="space-y-5">
+                  <TicketFieldSelect
+                    ticketId={ticket.id}
+                    id="ticket-status"
+                    label="Status"
+                    value={ticket.status}
+                    options={statusOptions}
+                    toUpdate={(value) => (isTicketStatus(value) ? { status: value } : {})}
+                  />
+                  <TicketFieldSelect
+                    ticketId={ticket.id}
+                    id="ticket-category"
+                    label="Category"
+                    value={ticket.category ?? ''}
+                    options={categoryOptions}
+                    toUpdate={(value) => ({ category: isTicketCategory(value) ? value : null })}
+                  />
+                  <TicketAssigneeSelect ticket={ticket} />
+                </dl>
+              </CardContent>
+            </Card>
+          </div>
         </>
       )}
     </section>
