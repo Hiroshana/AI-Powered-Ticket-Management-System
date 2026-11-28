@@ -29,9 +29,14 @@ import {
 // OPEN, uncategorized and unassigned. Other tests create tickets in parallel, so
 // tests look up their own tickets by unique subject and never assert totals or
 // absolute row positions. A freshly delivered ticket is always near the top of
-// the newest-first list, so it is on page 1.
+// the newest-first list, so it is on page 1 of LIST.
 
 const NO_MATCHES = 'No tickets match these filters.'
+
+// The list at its largest page size. Tests that look for a ticket they just
+// delivered open this, so tickets other tests create in parallel can't push it
+// off page 1 (the default is only 10 rows).
+const LIST = '/tickets?pageSize=100'
 
 type Email = { subject: string; from: string; fromName: string; text: string; messageId: string }
 
@@ -87,7 +92,7 @@ for (const [user, state] of roles) {
       const response = await page.request.get(TICKETS_API)
       expect(response.status()).toBe(200)
       const body = await response.json()
-      expect(body).toMatchObject({ page: 1, pageSize: 20 })
+      expect(body).toMatchObject({ page: 1, pageSize: 10 })
       expect(Array.isArray(body.tickets)).toBe(true)
       expect(typeof body.total).toBe('number')
     })
@@ -109,7 +114,7 @@ test.describe('list', () => {
     const email = newEmail()
     const id = await expectTicket(await deliver(email), 201)
 
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectTicketsPage(page)
     const table = ticketsTable(page)
     for (const column of ['#', 'Subject', 'From', 'Status', 'Category', 'Assignee', 'Received']) {
@@ -135,7 +140,7 @@ test.describe('list', () => {
     await expectTicket(await deliver(first), 201)
     await expectTicket(await deliver(second), 201)
 
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectRowVisible(page, first)
     await expectRowVisible(page, second)
 
@@ -153,20 +158,20 @@ test.describe('filters', () => {
   test('the status filter updates the URL and the request', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectRowVisible(page, email)
     await expect(statusSelect(page)).toHaveValue('')
 
     let request = page.waitForRequest(isTicketsRequest({ status: 'OPEN', page: '1' }))
     await statusSelect(page).selectOption({ label: 'Open' })
     await request
-    await expect(page).toHaveURL('/tickets?status=OPEN')
+    await expect(page).toHaveURL(`${LIST}&status=OPEN`)
     await expectRowVisible(page, email)
 
     request = page.waitForRequest(isTicketsRequest({ status: 'RESOLVED', page: '1' }))
     await statusSelect(page).selectOption({ label: 'Resolved' })
     await request
-    await expect(page).toHaveURL('/tickets?status=RESOLVED')
+    await expect(page).toHaveURL(`${LIST}&status=RESOLVED`)
     // Inbound tickets are always OPEN and nothing can resolve them yet.
     await expect(page.getByText(NO_MATCHES, { exact: true })).toBeVisible()
     await expect(ticketRow(page, email.subject)).toHaveCount(0)
@@ -174,20 +179,20 @@ test.describe('filters', () => {
     request = page.waitForRequest(isTicketsRequest({ status: undefined, page: '1' }))
     await statusSelect(page).selectOption({ label: 'All statuses' })
     await request
-    await expect(page).toHaveURL('/tickets')
+    await expect(page).toHaveURL(LIST)
     await expectRowVisible(page, email)
   })
 
   test('the category filter shows no uncategorized tickets', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectRowVisible(page, email)
 
     const request = page.waitForRequest(isTicketsRequest({ category: 'REFUND_REQUEST' }))
     await categorySelect(page).selectOption({ label: 'Refund Request' })
     await request
-    await expect(page).toHaveURL('/tickets?category=REFUND_REQUEST')
+    await expect(page).toHaveURL(`${LIST}&category=REFUND_REQUEST`)
     await expect(page.getByText(NO_MATCHES, { exact: true })).toBeVisible()
     await expect(ticketRow(page, email.subject)).toHaveCount(0)
   })
@@ -195,27 +200,27 @@ test.describe('filters', () => {
   test('filters survive a reload and back navigation', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectRowVisible(page, email)
 
     await statusSelect(page).selectOption({ label: 'Open' })
-    await expect(page).toHaveURL('/tickets?status=OPEN')
+    await expect(page).toHaveURL(`${LIST}&status=OPEN`)
 
     await page.reload()
     await expect(statusSelect(page)).toHaveValue('OPEN')
     await expectRowVisible(page, email)
 
     await statusSelect(page).selectOption({ label: 'Closed' })
-    await expect(page).toHaveURL('/tickets?status=CLOSED')
+    await expect(page).toHaveURL(`${LIST}&status=CLOSED`)
     await expect(page.getByText(NO_MATCHES, { exact: true })).toBeVisible()
 
     await page.goBack()
-    await expect(page).toHaveURL('/tickets?status=OPEN')
+    await expect(page).toHaveURL(`${LIST}&status=OPEN`)
     await expect(statusSelect(page)).toHaveValue('OPEN')
     await expectRowVisible(page, email)
 
     await page.goForward()
-    await expect(page).toHaveURL('/tickets?status=CLOSED')
+    await expect(page).toHaveURL(`${LIST}&status=CLOSED`)
     await expect(statusSelect(page)).toHaveValue('CLOSED')
     await expect(page.getByText(NO_MATCHES, { exact: true })).toBeVisible()
   })
@@ -227,7 +232,7 @@ test.describe('filters', () => {
     const request = page.waitForRequest(
       isTicketsRequest({ status: 'OPEN', category: undefined, page: '1' }),
     )
-    await page.goto('/tickets?status=OPEN')
+    await page.goto(`${LIST}&status=OPEN`)
     await request
     await expect(statusSelect(page)).toHaveValue('OPEN')
     await expect(categorySelect(page)).toHaveValue('')
@@ -236,13 +241,13 @@ test.describe('filters', () => {
 
   test('changing a filter resets to page 1', async ({ page, deliver }) => {
     await expectTicket(await deliver(newEmail()), 201)
-    await page.goto('/tickets?page=2')
+    await page.goto(`${LIST}&page=2`)
     await expectTicketsPage(page)
 
     const request = page.waitForRequest(isTicketsRequest({ status: 'OPEN', page: '1' }))
     await statusSelect(page).selectOption({ label: 'Open' })
     await request
-    await expect(page).toHaveURL('/tickets?status=OPEN')
+    await expect(page).toHaveURL(`${LIST}&status=OPEN`)
   })
 })
 
@@ -252,7 +257,7 @@ test.describe('pagination', () => {
   test('page 1 shows the first range with Previous disabled', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
-    await page.goto('/tickets')
+    await page.goto(LIST)
     await expectRowVisible(page, email)
 
     await expect(pagination(page).getByText(/^Showing 1–\d+ of \d+$/)).toBeVisible()
@@ -267,7 +272,7 @@ test.describe('pagination', () => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
 
-    const request = page.waitForRequest(isTicketsRequest({ page: '2', pageSize: '20' }))
+    const request = page.waitForRequest(isTicketsRequest({ page: '2', pageSize: '10' }))
     await page.goto('/tickets?page=2')
     await request
     await expectTicketsPage(page)
@@ -275,21 +280,40 @@ test.describe('pagination', () => {
     // depending on how many tickets other tests have created so far.
     await expect(
       pagination(page)
-        .getByText(/^Showing 21–\d+ of \d+$/)
+        .getByText(/^Showing 11–\d+ of \d+$/)
         .or(page.getByText('No tickets on this page.', { exact: true })),
     ).toBeVisible()
     await expect(ticketRow(page, email.subject)).toHaveCount(0)
   })
 
+  test('rows per page defaults to 10, changes the request and survives a reload', async ({
+    page,
+    deliver,
+  }) => {
+    await ensureATicket(page.request, deliver)
+    await page.goto('/tickets')
+    const select = pagination(page).getByLabel('Rows per page', { exact: true })
+    await expect(select).toHaveValue('10')
+
+    const request = page.waitForRequest(isTicketsRequest({ pageSize: '25' }))
+    await select.selectOption('25')
+    await request
+    await expect(page).toHaveURL('/tickets?pageSize=25')
+
+    await page.reload()
+    await expect(pagination(page).getByLabel('Rows per page', { exact: true })).toHaveValue('25')
+    await expect(pagination(page).getByText(/^Showing 1–\d+ of \d+$/)).toBeVisible()
+  })
+
   test('a page past the end offers a way back to the first page', async ({ page, deliver }) => {
     const email = newEmail()
     await expectTicket(await deliver(email), 201)
-    await page.goto('/tickets?page=1000')
+    await page.goto(`${LIST}&page=1000`)
     await expect(page.getByText('No tickets on this page.', { exact: true })).toBeVisible()
     await expect(ticketsTable(page)).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Go to first page', exact: true }).click()
-    await expect(page).toHaveURL('/tickets')
+    await expect(page).toHaveURL(LIST)
     await expectRowVisible(page, email)
     await expect(previousButton(page)).toBeDisabled()
   })
@@ -482,7 +506,7 @@ test.describe('sorting', () => {
       },
     )
     await page.goto('/tickets?status=OPEN&page=2')
-    await expect(pagination(page).getByText(/^Showing 21–\d+ of \d+$/)).toBeVisible()
+    await expect(pagination(page).getByText(/^Showing 11–\d+ of \d+$/)).toBeVisible()
 
     const request = page.waitForRequest(
       isTicketsRequest({ status: 'OPEN', sort: 'subject', order: 'asc', page: '1' }),
@@ -520,7 +544,7 @@ test.describe('sorting API', () => {
       sort: 'subject',
       order: 'asc',
       page: 1,
-      pageSize: 20,
+      pageSize: 10,
     })
   })
 

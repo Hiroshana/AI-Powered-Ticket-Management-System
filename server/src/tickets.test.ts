@@ -176,10 +176,10 @@ test("combines status and category filters", async () => {
   expect(body.total).toBe(await prisma.ticket.count({ where: { status: "OPEN", category: "REFUND_REQUEST" } }));
 });
 
-test("paginates with page and pageSize, defaulting to page 1 of 20", async () => {
+test("paginates with page and pageSize, defaulting to page 1 of 10", async () => {
   const defaults = await listOk();
   expect(defaults.page).toBe(1);
-  expect(defaults.pageSize).toBe(20);
+  expect(defaults.pageSize).toBe(10);
   expect(defaults.total).toBe(await prisma.ticket.count());
 
   const first = await listOk("?pageSize=2");

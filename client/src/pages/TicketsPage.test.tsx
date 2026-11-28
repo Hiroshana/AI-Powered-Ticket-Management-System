@@ -35,7 +35,7 @@ const response = (overrides: Partial<TicketListResponse> = {}): TicketListRespon
   tickets,
   total: tickets.length,
   page: 1,
-  pageSize: 20,
+  pageSize: 10,
   sort: 'createdAt',
   order: 'desc',
   ...overrides,
@@ -117,7 +117,7 @@ describe('TicketsPage', () => {
       sort: 'createdAt',
       order: 'desc',
       page: 1,
-      pageSize: 20,
+      pageSize: 10,
     })
     expect(config?.signal).toBeInstanceOf(AbortSignal)
   })
@@ -176,7 +176,7 @@ describe('TicketsPage', () => {
       sort: 'subject',
       order: 'asc',
       page: 2,
-      pageSize: 20,
+      pageSize: 10,
     })
     expect(sortOf('Subject')).toBe('ascending')
     expect(screen.getByLabelText('Status')).toHaveValue('OPEN')
@@ -195,7 +195,7 @@ describe('TicketsPage', () => {
       sort: 'createdAt',
       order: 'desc',
       page: 1,
-      pageSize: 20,
+      pageSize: 10,
     })
     expect(screen.getByLabelText('Status')).toHaveValue('')
   })
@@ -220,6 +220,54 @@ describe('TicketsPage', () => {
     await user.selectOptions(screen.getByLabelText('Status'), '')
     await waitFor(() => expect(lastParams()).toMatchObject({ status: undefined, category: 'TECHNICAL_QUESTION' }))
     expect(currentUrl()).toBe('/tickets?category=TECHNICAL_QUESTION')
+  })
+
+  test('defaults to 10 rows per page and offers 10, 15, 20, 25, 50 and 100', async () => {
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage()
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    const select = screen.getByLabelText('Rows per page')
+    expect(select).toHaveValue('10')
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      '10',
+      '15',
+      '20',
+      '25',
+      '50',
+      '100',
+    ])
+  })
+
+  test('reads the page size from the URL and ignores values not in the list', async () => {
+    getSpy.mockReturnValue(ok(response({ pageSize: 50 })))
+    const first = renderPage('/tickets?pageSize=50')
+    await screen.findByRole('table', { name: 'Tickets' })
+    expect(lastParams()).toMatchObject({ pageSize: 50 })
+    expect(screen.getByLabelText('Rows per page')).toHaveValue('50')
+    first.unmount()
+
+    renderPage('/tickets?pageSize=7')
+    await screen.findByRole('table', { name: 'Tickets' })
+    expect(lastParams()).toMatchObject({ pageSize: 10 })
+  })
+
+  test('changing the page size refetches from page 1 and updates the URL', async () => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response({ total: 60, page: 3 })))
+
+    renderPage('/tickets?status=OPEN&page=3')
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    await user.selectOptions(screen.getByLabelText('Rows per page'), '25')
+    await waitFor(() => expect(lastParams()).toMatchObject({ status: 'OPEN', pageSize: 25, page: 1 }))
+    expect(currentUrl()).toBe('/tickets?status=OPEN&pageSize=25')
+
+    // Back to the default drops it from the URL.
+    await user.selectOptions(screen.getByLabelText('Rows per page'), '10')
+    await waitFor(() => expect(lastParams()).toMatchObject({ pageSize: 10 }))
+    expect(currentUrl()).toBe('/tickets?status=OPEN')
   })
 
   test('starts sorted newest first, shown on the Received header', async () => {
@@ -306,7 +354,7 @@ describe('TicketsPage', () => {
 
   test('Next and Previous move between pages and are disabled at the ends', async () => {
     const user = userEvent.setup()
-    getSpy.mockImplementation(respondByPage((page) => response({ total: 45, page })))
+    getSpy.mockImplementation(respondByPage((page) => response({ total: 25, page })))
 
     renderPage()
     await screen.findByRole('table', { name: 'Tickets' })
@@ -318,7 +366,7 @@ describe('TicketsPage', () => {
     await user.click(next)
     await waitFor(() => expect(lastParams()).toMatchObject({ page: 2 }))
     expect(currentUrl()).toBe('/tickets?page=2')
-    expect(await screen.findByText('Showing 21–22 of 45')).toBeInTheDocument()
+    expect(await screen.findByText('Showing 11–12 of 25')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(lastParams()).toMatchObject({ page: 3 }))

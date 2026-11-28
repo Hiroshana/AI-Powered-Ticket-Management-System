@@ -53,7 +53,7 @@ const listQuerySchema = z.object({
     .int("Page size must be between 1 and 100")
     .min(1, "Page size must be between 1 and 100")
     .max(100, "Page size must be between 1 and 100")
-    .default(20),
+    .default(10),
   sort: z.enum(sortKeys, `Sort must be one of ${sortKeys.join(", ")}`).default("createdAt"),
   order: z.enum(["asc", "desc"], "Order must be asc or desc").default("desc"),
 });

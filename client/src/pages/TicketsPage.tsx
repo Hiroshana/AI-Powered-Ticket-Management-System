@@ -14,11 +14,14 @@ import { useSearchParams } from 'react-router'
 import { api } from '@/lib/api'
 import {
   DEFAULT_ORDER,
+  DEFAULT_PAGE_SIZE,
   DEFAULT_SORT,
+  isPageSize,
   isSortOrder,
   isTicketCategory,
   isTicketSortKey,
   isTicketStatus,
+  pageSizeOptions,
   ticketCategoryLabels,
   ticketStatusLabels,
   type TicketListItem,
@@ -40,12 +43,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-// Must match the server's default page size.
-const PAGE_SIZE = 20
-
-// Same spacing as the users table.
+// Roomier rows than the users table: taller header and more vertical cell padding.
 const tableSpacing =
-  '[&_td]:px-4 [&_th]:px-4 [&_td]:py-3 [&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-6'
+  '[&_td]:px-4 [&_th]:px-4 [&_th]:h-12 [&_td]:py-4 [&_tr>*:first-child]:pl-6 [&_tr>*:last-child]:pr-6'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -63,14 +63,21 @@ const columns = columnHelper.columns([
   }),
   columnHelper.accessor('subject', {
     header: 'Subject',
-    cell: (info) => <span className="block max-w-80 truncate font-medium">{info.getValue()}</span>,
+    // Long subjects are cut off (full text on hover) so the table fits the page.
+    cell: (info) => (
+      <span className="block max-w-[40ch] truncate font-medium" title={info.getValue()}>
+        {info.getValue()}
+      </span>
+    ),
   }),
   columnHelper.accessor('fromName', {
     header: 'From',
     cell: (info) => (
       <>
         <div>{info.getValue()}</div>
-        <div className="text-xs text-muted-foreground">{info.row.original.fromEmail}</div>
+        <div className="max-w-[28ch] truncate text-xs text-muted-foreground" title={info.row.original.fromEmail}>
+          {info.row.original.fromEmail}
+        </div>
       </>
     ),
   }),
@@ -123,17 +130,21 @@ function useTicketFilters() {
   const rawSort = searchParams.get('sort')
   const rawOrder = searchParams.get('order')
   const rawPage = Number(searchParams.get('page'))
+  const rawPageSize = Number(searchParams.get('pageSize'))
 
   const status = isTicketStatus(rawStatus) ? rawStatus : undefined
   const category = isTicketCategory(rawCategory) ? rawCategory : undefined
   const sort = isTicketSortKey(rawSort) ? rawSort : DEFAULT_SORT
   const order = isSortOrder(rawOrder) ? rawOrder : DEFAULT_ORDER
   const page = Number.isInteger(rawPage) && rawPage > 1 ? rawPage : 1
+  const pageSize = isPageSize(rawPageSize) ? rawPageSize : DEFAULT_PAGE_SIZE
 
   function update(changes: Record<string, string | number | undefined>) {
     setSearchParams((params) => {
       for (const [key, value] of Object.entries(changes)) {
-        if (value === undefined || value === '' || (key === 'page' && value === 1)) params.delete(key)
+        const isDefault =
+          (key === 'page' && value === 1) || (key === 'pageSize' && value === DEFAULT_PAGE_SIZE)
+        if (value === undefined || value === '' || isDefault) params.delete(key)
         else params.set(key, String(value))
       }
       if (params.get('sort') === DEFAULT_SORT && params.get('order') === DEFAULT_ORDER) {
@@ -144,7 +155,7 @@ function useTicketFilters() {
     })
   }
 
-  return { status, category, sort, order, page, update }
+  return { status, category, sort, order, page, pageSize, update }
 }
 
 function TicketsTableSkeleton() {
@@ -194,15 +205,15 @@ function TicketsTableSkeleton() {
 const ariaSort = { asc: 'ascending', desc: 'descending' } as const
 
 export default function TicketsPage() {
-  const { status, category, sort, order, page, update } = useTicketFilters()
+  const { status, category, sort, order, page, pageSize, update } = useTicketFilters()
   const filtered = status !== undefined || category !== undefined
 
   const { data, isError, refetch, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ['tickets', { status, category, sort, order, page }],
+    queryKey: ['tickets', { status, category, sort, order, page, pageSize }],
     queryFn: async ({ signal }) =>
       (
         await api.get<TicketListResponse>('/tickets', {
-          params: { status, category, sort, order, page, pageSize: PAGE_SIZE },
+          params: { status, category, sort, order, page, pageSize },
           signal,
         })
       ).data,
@@ -235,9 +246,9 @@ export default function TicketsPage() {
 
   const tickets = data?.tickets
   const total = data?.total ?? 0
-  const firstShown = (page - 1) * PAGE_SIZE + 1
-  const lastShown = (page - 1) * PAGE_SIZE + (tickets?.length ?? 0)
-  const hasNext = page * PAGE_SIZE < total
+  const firstShown = (page - 1) * pageSize + 1
+  const lastShown = (page - 1) * pageSize + (tickets?.length ?? 0)
+  const hasNext = page * pageSize < total
 
   return (
     <section className="space-y-4">
@@ -357,9 +368,29 @@ export default function TicketsPage() {
           </Card>
 
           <nav aria-label="Pagination" className="flex items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              Showing {firstShown}–{lastShown} of {total}
-            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <p className="text-sm text-muted-foreground">
+                Showing {firstShown}–{lastShown} of {total}
+              </p>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="ticket-page-size" className="whitespace-nowrap font-normal text-muted-foreground">
+                  Rows per page
+                </Label>
+                <NativeSelect
+                  id="ticket-page-size"
+                  size="sm"
+                  value={pageSize}
+                  // Changing the page size goes back to page 1.
+                  onChange={(e) => update({ pageSize: Number(e.target.value), page: undefined })}
+                >
+                  {pageSizeOptions.map((size) => (
+                    <NativeSelectOption key={size} value={size}>
+                      {size}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+            </div>
             <div className="flex gap-2">
               <Button
                 variant="outline"

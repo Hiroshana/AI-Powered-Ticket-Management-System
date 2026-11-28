@@ -43,6 +43,14 @@ export const isSortOrder = (value: unknown): value is SortOrder => value === 'as
 export const DEFAULT_SORT: TicketSortKey = 'createdAt'
 export const DEFAULT_ORDER: SortOrder = 'desc'
 
+// Rows-per-page choices. The server accepts 1–100 and defaults to 10.
+export const pageSizeOptions = [10, 15, 20, 25, 50, 100] as const
+export type PageSize = (typeof pageSizeOptions)[number]
+export const DEFAULT_PAGE_SIZE: PageSize = 10
+
+export const isPageSize = (value: unknown): value is PageSize =>
+  (pageSizeOptions as readonly unknown[]).includes(value)
+
 export type TicketListItem = {
   id: number
   subject: string
