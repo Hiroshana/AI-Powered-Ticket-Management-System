@@ -22,6 +22,27 @@ export const isTicketStatus = (value: unknown): value is TicketStatus =>
 export const isTicketCategory = (value: unknown): value is TicketCategory =>
   typeof value === 'string' && Object.hasOwn(ticketCategoryLabels, value)
 
+// Columns GET /api/tickets can sort by (server/src/routes/tickets.ts). Keep in sync.
+export const ticketSortKeys = [
+  'id',
+  'subject',
+  'fromName',
+  'status',
+  'category',
+  'assignee',
+  'createdAt',
+] as const
+export type TicketSortKey = (typeof ticketSortKeys)[number]
+export type SortOrder = 'asc' | 'desc'
+
+export const isTicketSortKey = (value: unknown): value is TicketSortKey =>
+  typeof value === 'string' && (ticketSortKeys as readonly string[]).includes(value)
+
+export const isSortOrder = (value: unknown): value is SortOrder => value === 'asc' || value === 'desc'
+
+export const DEFAULT_SORT: TicketSortKey = 'createdAt'
+export const DEFAULT_ORDER: SortOrder = 'desc'
+
 export type TicketListItem = {
   id: number
   subject: string
@@ -38,4 +59,6 @@ export type TicketListResponse = {
   total: number
   page: number
   pageSize: number
+  sort: TicketSortKey
+  order: SortOrder
 }

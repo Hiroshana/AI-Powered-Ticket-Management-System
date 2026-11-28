@@ -1,12 +1,27 @@
-import { AlertCircleIcon } from 'lucide-react'
+import { useMemo } from 'react'
+import { AlertCircleIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from 'lucide-react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import {
+  createColumnHelper,
+  functionalUpdate,
+  rowSortingFeature,
+  tableFeatures,
+  useTable,
+  type OnChangeFn,
+  type SortingState,
+} from '@tanstack/react-table'
 import { useSearchParams } from 'react-router'
 import { api } from '@/lib/api'
 import {
+  DEFAULT_ORDER,
+  DEFAULT_SORT,
+  isSortOrder,
   isTicketCategory,
+  isTicketSortKey,
   isTicketStatus,
   ticketCategoryLabels,
   ticketStatusLabels,
+  type TicketListItem,
   type TicketListResponse,
 } from '@/lib/tickets'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -34,18 +49,85 @@ const tableSpacing =
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-const columns = ['#', 'Subject', 'From', 'Status', 'Category', 'Assignee', 'Received']
+// Sorting state and APIs only: rows arrive already sorted by the server
+// (manualSorting), so there's no client-side sorted row model.
+const features = tableFeatures({ rowSortingFeature })
+const columnHelper = createColumnHelper<typeof features, TicketListItem>()
 
-// Filters and page live in the URL, so they survive reloads and work with back/forward.
-// Invalid values are ignored rather than sent to the server.
+// Column ids are the server's sort keys (TicketSortKey).
+const columns = columnHelper.columns([
+  columnHelper.accessor('id', {
+    header: '#',
+    sortDescFirst: true,
+    cell: (info) => <span className="text-muted-foreground">{info.getValue()}</span>,
+  }),
+  columnHelper.accessor('subject', {
+    header: 'Subject',
+    cell: (info) => <span className="block max-w-80 truncate font-medium">{info.getValue()}</span>,
+  }),
+  columnHelper.accessor('fromName', {
+    header: 'From',
+    cell: (info) => (
+      <>
+        <div>{info.getValue()}</div>
+        <div className="text-xs text-muted-foreground">{info.row.original.fromEmail}</div>
+      </>
+    ),
+  }),
+  columnHelper.accessor('status', {
+    header: 'Status',
+    cell: (info) => (
+      <Badge variant={info.getValue() === 'OPEN' ? 'default' : 'secondary'}>
+        {ticketStatusLabels[info.getValue()]}
+      </Badge>
+    ),
+  }),
+  columnHelper.accessor('category', {
+    header: 'Category',
+    cell: (info) => {
+      const category = info.getValue()
+      return category ? (
+        ticketCategoryLabels[category]
+      ) : (
+        <span className="text-muted-foreground">Uncategorized</span>
+      )
+    },
+  }),
+  columnHelper.accessor((ticket) => ticket.assignee?.name ?? null, {
+    id: 'assignee',
+    header: 'Assignee',
+    cell: (info) => info.getValue() ?? <span className="text-muted-foreground">Unassigned</span>,
+  }),
+  columnHelper.accessor('createdAt', {
+    header: 'Received',
+    sortDescFirst: true,
+    cell: (info) => (
+      <span className="whitespace-nowrap text-muted-foreground">
+        {dateFormat.format(new Date(info.getValue()))}
+      </span>
+    ),
+  }),
+])
+
+const columnLabels = ['#', 'Subject', 'From', 'Status', 'Category', 'Assignee', 'Received']
+
+const noTickets: TicketListItem[] = []
+
+// Filters, sort and page live in the URL, so they survive reloads and work with
+// back/forward. Invalid values are ignored rather than sent to the server, and
+// defaults are left out of the URL.
 function useTicketFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
   const rawStatus = searchParams.get('status')
   const rawCategory = searchParams.get('category')
+  const rawSort = searchParams.get('sort')
+  const rawOrder = searchParams.get('order')
   const rawPage = Number(searchParams.get('page'))
 
   const status = isTicketStatus(rawStatus) ? rawStatus : undefined
   const category = isTicketCategory(rawCategory) ? rawCategory : undefined
+  const sort = isTicketSortKey(rawSort) ? rawSort : DEFAULT_SORT
+  const order = isSortOrder(rawOrder) ? rawOrder : DEFAULT_ORDER
   const page = Number.isInteger(rawPage) && rawPage > 1 ? rawPage : 1
 
   function update(changes: Record<string, string | number | undefined>) {
@@ -54,11 +136,15 @@ function useTicketFilters() {
         if (value === undefined || value === '' || (key === 'page' && value === 1)) params.delete(key)
         else params.set(key, String(value))
       }
+      if (params.get('sort') === DEFAULT_SORT && params.get('order') === DEFAULT_ORDER) {
+        params.delete('sort')
+        params.delete('order')
+      }
       return params
     })
   }
 
-  return { status, category, page, update }
+  return { status, category, sort, order, page, update }
 }
 
 function TicketsTableSkeleton() {
@@ -68,8 +154,8 @@ function TicketsTableSkeleton() {
       <Table aria-hidden="true" className={tableSpacing}>
         <TableHeader>
           <TableRow>
-            {columns.map((column) => (
-              <TableHead key={column}>{column}</TableHead>
+            {columnLabels.map((label) => (
+              <TableHead key={label}>{label}</TableHead>
             ))}
           </TableRow>
         </TableHeader>
@@ -105,21 +191,46 @@ function TicketsTableSkeleton() {
   )
 }
 
+const ariaSort = { asc: 'ascending', desc: 'descending' } as const
+
 export default function TicketsPage() {
-  const { status, category, page, update } = useTicketFilters()
+  const { status, category, sort, order, page, update } = useTicketFilters()
   const filtered = status !== undefined || category !== undefined
 
   const { data, isError, refetch, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ['tickets', { status, category, page }],
+    queryKey: ['tickets', { status, category, sort, order, page }],
     queryFn: async ({ signal }) =>
       (
         await api.get<TicketListResponse>('/tickets', {
-          params: { status, category, page, pageSize: PAGE_SIZE },
+          params: { status, category, sort, order, page, pageSize: PAGE_SIZE },
           signal,
         })
       ).data,
-    // Keep the current page on screen while the next page or filter loads.
+    // Keep the current rows on screen while the next page, filter or sort loads.
     placeholderData: keepPreviousData,
+  })
+
+  // The URL is the source of truth for sorting; the table only reads it and
+  // reports header clicks back.
+  const sorting = useMemo<SortingState>(() => [{ id: sort, desc: order === 'desc' }], [sort, order])
+  const onSortingChange: OnChangeFn<SortingState> = (updater) => {
+    const [next] = functionalUpdate(updater, sorting)
+    if (!next || !isTicketSortKey(next.id)) return
+    update({ sort: next.id, order: next.desc ? 'desc' : 'asc', page: undefined })
+  }
+
+  const table = useTable({
+    features,
+    columns,
+    data: data?.tickets ?? noTickets,
+    manualSorting: true,
+    // Always sorted by exactly one column: clicks toggle asc ↔ desc.
+    enableSortingRemoval: false,
+    enableMultiSort: false,
+    // Text columns sort A→Z first; # and Received opt into newest/highest first.
+    sortDescFirst: false,
+    state: { sorting },
+    onSortingChange,
   })
 
   const tickets = data?.tickets
@@ -201,37 +312,44 @@ export default function TicketsPage() {
               className={`${tableSpacing} ${isPlaceholderData ? 'opacity-60' : ''}`}
             >
               <TableHeader>
-                <TableRow>
-                  {columns.map((column) => (
-                    <TableHead key={column} className={column === '#' ? 'w-16' : undefined}>
-                      {column}
-                    </TableHead>
-                  ))}
-                </TableRow>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => {
+                      const sorted = header.column.getIsSorted()
+                      const SortIcon =
+                        sorted === 'asc' ? ArrowUpIcon : sorted === 'desc' ? ArrowDownIcon : ArrowUpDownIcon
+                      return (
+                        <TableHead
+                          key={header.id}
+                          aria-sort={sorted ? ariaSort[sorted] : 'none'}
+                          className={header.column.id === 'id' ? 'w-16' : undefined}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="-ml-2.5"
+                            onClick={header.column.getToggleSortingHandler()}
+                          >
+                            <table.FlexRender header={header} />
+                            <SortIcon
+                              aria-hidden="true"
+                              className={sorted ? undefined : 'text-muted-foreground opacity-50'}
+                            />
+                          </Button>
+                        </TableHead>
+                      )
+                    })}
+                  </TableRow>
+                ))}
               </TableHeader>
               <TableBody>
-                {tickets.map((ticket) => (
-                  <TableRow key={ticket.id}>
-                    <TableCell className="text-muted-foreground">{ticket.id}</TableCell>
-                    <TableCell className="max-w-80 truncate font-medium">{ticket.subject}</TableCell>
-                    <TableCell>
-                      <div>{ticket.fromName}</div>
-                      <div className="text-xs text-muted-foreground">{ticket.fromEmail}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={ticket.status === 'OPEN' ? 'default' : 'secondary'}>
-                        {ticketStatusLabels[ticket.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className={ticket.category ? undefined : 'text-muted-foreground'}>
-                      {ticket.category ? ticketCategoryLabels[ticket.category] : 'Uncategorized'}
-                    </TableCell>
-                    <TableCell className={ticket.assignee ? undefined : 'text-muted-foreground'}>
-                      {ticket.assignee?.name ?? 'Unassigned'}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {dateFormat.format(new Date(ticket.createdAt))}
-                    </TableCell>
+                {table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id}>
+                    {row.getAllCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        <table.FlexRender cell={cell} />
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>

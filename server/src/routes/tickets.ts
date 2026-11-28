@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "../generated/prisma/client.ts";
 import { TicketCategory, TicketStatus } from "../generated/prisma/enums.ts";
 import { HttpError } from "../middleware/error.ts";
 import { prisma } from "../lib/prisma.ts";
@@ -22,6 +23,25 @@ const ticketListFields = {
   assignee: { select: { id: true, name: true } },
 } as const;
 
+// Keep in sync with TicketSortKey in client/src/lib/tickets.ts.
+const sortKeys = ["id", "subject", "fromName", "status", "category", "assignee", "createdAt"] as const;
+type SortKey = (typeof sortKeys)[number];
+type SortOrder = "asc" | "desc";
+
+// Status and category sort in enum declaration order (Open → Resolved → Closed),
+// not alphabetically. Uncategorized tickets always go last. Unassigned tickets
+// follow Postgres' default: last when ascending, first when descending.
+function orderByFor(sort: SortKey, order: SortOrder): Prisma.TicketOrderByWithRelationInput[] {
+  const primary: Prisma.TicketOrderByWithRelationInput =
+    sort === "category"
+      ? { category: { sort: order, nulls: "last" } }
+      : sort === "assignee"
+        ? { assignee: { name: order } }
+        : { [sort]: order };
+  // The id tiebreak keeps pages stable when sorted values are equal.
+  return sort === "id" ? [primary] : [primary, { id: order }];
+}
+
 const listQuerySchema = z.object({
   status: z.enum(TicketStatus, "Status must be OPEN, RESOLVED or CLOSED").optional(),
   category: z
@@ -34,6 +54,8 @@ const listQuerySchema = z.object({
     .min(1, "Page size must be between 1 and 100")
     .max(100, "Page size must be between 1 and 100")
     .default(20),
+  sort: z.enum(sortKeys, `Sort must be one of ${sortKeys.join(", ")}`).default("createdAt"),
+  order: z.enum(["asc", "desc"], "Order must be asc or desc").default("desc"),
 });
 
 ticketsRouter.get("/", async (req, res) => {
@@ -41,20 +63,20 @@ ticketsRouter.get("/", async (req, res) => {
   if (!parsed.success) {
     throw new HttpError(400, parsed.error.issues[0]?.message ?? "Invalid request");
   }
-  const { status, category, page, pageSize } = parsed.data;
+  const { status, category, page, pageSize, sort, order } = parsed.data;
   const where = { status, category };
 
   const [tickets, total] = await prisma.$transaction([
     prisma.ticket.findMany({
       where,
       select: ticketListFields,
-      // Newest first; the id tiebreak keeps pages stable when timestamps match.
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      // Defaults to newest first.
+      orderBy: orderByFor(sort, order),
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
     prisma.ticket.count({ where }),
   ]);
 
-  res.json({ tickets, total, page, pageSize });
+  res.json({ tickets, total, page, pageSize, sort, order });
 });

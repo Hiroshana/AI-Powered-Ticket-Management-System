@@ -20,17 +20,18 @@ type Seed = {
   status: "OPEN" | "RESOLVED" | "CLOSED";
   category: "GENERAL_QUESTION" | "TECHNICAL_QUESTION" | "REFUND_REQUEST" | null;
   createdAt: Date;
-  assigned?: boolean;
+  fromName: string;
+  assignee?: "admin" | "agent";
 };
 
 // In expected newest-first order. "tie-b" and "tie-a" share a timestamp; tie-b
 // is created later, so it gets the higher id and comes first.
 const seeds: Seed[] = [
-  { subject: "newest", status: "OPEN", category: "REFUND_REQUEST", createdAt: at(50), assigned: true },
-  { subject: "tie-b", status: "RESOLVED", category: null, createdAt: at(40) },
-  { subject: "tie-a", status: "OPEN", category: "TECHNICAL_QUESTION", createdAt: at(40) },
-  { subject: "middle", status: "CLOSED", category: "REFUND_REQUEST", createdAt: at(30) },
-  { subject: "oldest", status: "OPEN", category: "GENERAL_QUESTION", createdAt: at(20) },
+  { subject: "newest", status: "OPEN", category: "REFUND_REQUEST", createdAt: at(50), fromName: "Eve", assignee: "agent" },
+  { subject: "tie-b", status: "RESOLVED", category: null, createdAt: at(40), fromName: "Dan" },
+  { subject: "tie-a", status: "OPEN", category: "TECHNICAL_QUESTION", createdAt: at(40), fromName: "Cat" },
+  { subject: "middle", status: "CLOSED", category: "REFUND_REQUEST", createdAt: at(30), fromName: "Bob", assignee: "admin" },
+  { subject: "oldest", status: "OPEN", category: "GENERAL_QUESTION", createdAt: at(20), fromName: "Amy" },
 ];
 const creationOrder = ["oldest", "middle", "tie-a", "tie-b", "newest"];
 
@@ -39,6 +40,7 @@ let baseUrl: string;
 let agentCookie: string;
 let adminCookie: string;
 let agentId: string;
+let adminId: string;
 
 type ListResponse = {
   tickets: {
@@ -51,10 +53,12 @@ type ListResponse = {
   total: number;
   page: number;
   pageSize: number;
+  sort: string;
+  order: string;
 };
 
 beforeAll(async () => {
-  await createCredentialUser({ ...admin, password });
+  adminId = (await createCredentialUser({ ...admin, password })).id;
   agentId = (await createCredentialUser({ ...agent, password })).id;
 
   for (const subject of creationOrder) {
@@ -64,11 +68,11 @@ beforeAll(async () => {
         subject: `${seed.subject} ${id}`,
         body: "Body",
         fromEmail: sender,
-        fromName: "Seed Sender",
+        fromName: seed.fromName,
         status: seed.status,
         category: seed.category,
         createdAt: seed.createdAt,
-        assigneeId: seed.assigned ? agentId : null,
+        assigneeId: seed.assignee === "agent" ? agentId : seed.assignee === "admin" ? adminId : null,
       },
     });
   }
@@ -107,6 +111,17 @@ async function listOk(query = "", cookie: string = agentCookie) {
   return (await res.json()) as ListResponse;
 }
 
+// Every page of a listing, so non-date sorts can be checked even when the shared
+// test DB holds more tickets than fit on one page.
+async function listAll(query: string) {
+  const all: ListResponse["tickets"] = [];
+  for (let page = 1; ; page++) {
+    const body = await listOk(`?pageSize=100&page=${page}&${query}`);
+    all.push(...body.tickets);
+    if (page * 100 >= body.total) return { ...body, tickets: all };
+  }
+}
+
 // This file's tickets, by seed name, in response order.
 const mine = (body: ListResponse) =>
   body.tickets.filter((t) => t.subject.endsWith(id)).map((t) => t.subject.replace(` ${id}`, ""));
@@ -131,7 +146,8 @@ test("lists newest first, breaking timestamp ties by id", async () => {
 
 test("returns only list fields, with the assignee as { id, name } or null", async () => {
   const body = await listOk();
-  expect(Object.keys(body).sort()).toEqual(["page", "pageSize", "tickets", "total"]);
+  expect(Object.keys(body).sort()).toEqual(["order", "page", "pageSize", "sort", "tickets", "total"]);
+  expect(body).toMatchObject({ sort: "createdAt", order: "desc" });
   const [newest, tieB] = body.tickets;
   expect(Object.keys(newest!).sort()).toEqual(
     ["assignee", "category", "createdAt", "fromEmail", "fromName", "id", "status", "subject"].sort(),
@@ -180,7 +196,46 @@ test("a page past the end is empty but still reports the total", async () => {
   expect(body.total).toBe(total);
 });
 
+// Expected order of this file's tickets. Seed ids ascend in creation order:
+// oldest < middle < tie-a < tie-b < newest. Ties fall back to id in the same direction.
 test.each([
+  ["id", "asc", ["oldest", "middle", "tie-a", "tie-b", "newest"]],
+  ["id", "desc", ["newest", "tie-b", "tie-a", "middle", "oldest"]],
+  ["createdAt", "asc", ["oldest", "middle", "tie-a", "tie-b", "newest"]],
+  ["createdAt", "desc", ["newest", "tie-b", "tie-a", "middle", "oldest"]],
+  ["subject", "asc", ["middle", "newest", "oldest", "tie-a", "tie-b"]],
+  ["subject", "desc", ["tie-b", "tie-a", "oldest", "newest", "middle"]],
+  ["fromName", "asc", ["oldest", "middle", "tie-a", "tie-b", "newest"]],
+  ["fromName", "desc", ["newest", "tie-b", "tie-a", "middle", "oldest"]],
+  // Enum order: OPEN, RESOLVED, CLOSED.
+  ["status", "asc", ["oldest", "tie-a", "newest", "tie-b", "middle"]],
+  ["status", "desc", ["middle", "tie-b", "newest", "tie-a", "oldest"]],
+  // Enum order: GENERAL, TECHNICAL, REFUND; uncategorized last both ways.
+  ["category", "asc", ["oldest", "tie-a", "middle", "newest", "tie-b"]],
+  ["category", "desc", ["newest", "middle", "tie-a", "oldest", "tie-b"]],
+  // By assignee name ("Tickets Admin" < "Tickets Agent"); unassigned last asc, first desc.
+  ["assignee", "asc", ["middle", "newest", "oldest", "tie-a", "tie-b"]],
+  ["assignee", "desc", ["tie-b", "tie-a", "oldest", "newest", "middle"]],
+])("sorts by %s %s", async (sort, order, expected) => {
+  const body = await listAll(`sort=${sort}&order=${order}`);
+  expect(body).toMatchObject({ sort, order });
+  expect(mine(body)).toEqual(expected);
+});
+
+test("sorting combines with filters and pagination", async () => {
+  const body = await listAll("status=OPEN&sort=subject&order=asc");
+  expect(body.tickets.every((t) => t.status === "OPEN")).toBe(true);
+  expect(mine(body)).toEqual(["newest", "oldest", "tie-a"]);
+
+  // Far-future seeds lead createdAt desc, so the first pages are exactly ours.
+  const pages = await Promise.all([1, 2, 3].map((p) => listOk(`?sort=createdAt&order=desc&pageSize=2&page=${p}`)));
+  expect(pages.map(mine)).toEqual([["newest", "tie-b"], ["tie-a", "middle"], ["oldest"]]);
+});
+
+test.each([
+  ["?sort=body", "Sort must be one of id, subject, fromName, status, category, assignee, createdAt"],
+  ["?sort=", "Sort must be one of id, subject, fromName, status, category, assignee, createdAt"],
+  ["?order=up", "Order must be asc or desc"],
   ["?status=PENDING", "Status must be OPEN, RESOLVED or CLOSED"],
   ["?status=", "Status must be OPEN, RESOLVED or CLOSED"],
   ["?category=BILLING", "Category must be GENERAL_QUESTION, TECHNICAL_QUESTION or REFUND_REQUEST"],

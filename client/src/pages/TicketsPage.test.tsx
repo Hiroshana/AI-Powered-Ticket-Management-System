@@ -36,6 +36,8 @@ const response = (overrides: Partial<TicketListResponse> = {}): TicketListRespon
   total: tickets.length,
   page: 1,
   pageSize: 20,
+  sort: 'createdAt',
+  order: 'desc',
   ...overrides,
 })
 
@@ -72,6 +74,14 @@ const lastParams = () => getSpy.mock.calls.at(-1)?.[1]?.params
 // Answers each request based on the page it asks for.
 const respondByPage = (fn: (page: number) => TicketListResponse) =>
   ((_url: string, config: { params: { page: number } }) => ok(fn(config.params.page))) as unknown as typeof api.get
+// aria-sort of the column header whose text is `label`.
+const sortOf = (label: string) =>
+  screen
+    .getAllByRole('columnheader')
+    .find((th) => th.textContent === label)
+    ?.getAttribute('aria-sort')
+const sortButton = (label: string) => screen.getByRole('button', { name: label })
+
 const formatDate = (iso: string) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
 
@@ -101,7 +111,14 @@ describe('TicketsPage', () => {
     expect(getSpy).toHaveBeenCalledTimes(1)
     const [url, config] = getSpy.mock.calls[0]!
     expect(url).toBe('/tickets')
-    expect(config?.params).toEqual({ status: undefined, category: undefined, page: 1, pageSize: 20 })
+    expect(config?.params).toEqual({
+      status: undefined,
+      category: undefined,
+      sort: 'createdAt',
+      order: 'desc',
+      page: 1,
+      pageSize: 20,
+    })
     expect(config?.signal).toBeInstanceOf(AbortSignal)
   })
 
@@ -150,10 +167,18 @@ describe('TicketsPage', () => {
   test('sends filters and page from the URL', async () => {
     getSpy.mockReturnValue(ok(response({ total: 60, page: 2 })))
 
-    renderPage('/tickets?status=OPEN&category=REFUND_REQUEST&page=2')
+    renderPage('/tickets?status=OPEN&category=REFUND_REQUEST&sort=subject&order=asc&page=2')
     await screen.findByRole('table', { name: 'Tickets' })
 
-    expect(lastParams()).toEqual({ status: 'OPEN', category: 'REFUND_REQUEST', page: 2, pageSize: 20 })
+    expect(lastParams()).toEqual({
+      status: 'OPEN',
+      category: 'REFUND_REQUEST',
+      sort: 'subject',
+      order: 'asc',
+      page: 2,
+      pageSize: 20,
+    })
+    expect(sortOf('Subject')).toBe('ascending')
     expect(screen.getByLabelText('Status')).toHaveValue('OPEN')
     expect(screen.getByLabelText('Category')).toHaveValue('REFUND_REQUEST')
   })
@@ -161,10 +186,17 @@ describe('TicketsPage', () => {
   test('ignores invalid URL values', async () => {
     getSpy.mockReturnValue(ok(response()))
 
-    renderPage('/tickets?status=PENDING&category=nope&page=-3')
+    renderPage('/tickets?status=PENDING&category=nope&sort=body&order=up&page=-3')
     await screen.findByRole('table', { name: 'Tickets' })
 
-    expect(lastParams()).toEqual({ status: undefined, category: undefined, page: 1, pageSize: 20 })
+    expect(lastParams()).toEqual({
+      status: undefined,
+      category: undefined,
+      sort: 'createdAt',
+      order: 'desc',
+      page: 1,
+      pageSize: 20,
+    })
     expect(screen.getByLabelText('Status')).toHaveValue('')
   })
 
@@ -188,6 +220,88 @@ describe('TicketsPage', () => {
     await user.selectOptions(screen.getByLabelText('Status'), '')
     await waitFor(() => expect(lastParams()).toMatchObject({ status: undefined, category: 'TECHNICAL_QUESTION' }))
     expect(currentUrl()).toBe('/tickets?category=TECHNICAL_QUESTION')
+  })
+
+  test('starts sorted newest first, shown on the Received header', async () => {
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage()
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    expect(sortOf('Received')).toBe('descending')
+    for (const label of ['#', 'Subject', 'From', 'Status', 'Category', 'Assignee']) {
+      expect(sortOf(label)).toBe('none')
+    }
+  })
+
+  test('clicking a header sorts on the server, A→Z first then Z→A', async () => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage()
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    await user.click(sortButton('Subject'))
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort: 'subject', order: 'asc', page: 1 }))
+    expect(currentUrl()).toBe('/tickets?sort=subject&order=asc')
+    expect(sortOf('Subject')).toBe('ascending')
+    expect(sortOf('Received')).toBe('none')
+
+    await user.click(sortButton('Subject'))
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort: 'subject', order: 'desc' }))
+    expect(currentUrl()).toBe('/tickets?sort=subject&order=desc')
+    expect(sortOf('Subject')).toBe('descending')
+
+    // Never unsorted: a third click goes back to ascending.
+    await user.click(sortButton('Subject'))
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort: 'subject', order: 'asc' }))
+  })
+
+  test.each([
+    ['#', 'id', 'desc'],
+    ['From', 'fromName', 'asc'],
+    ['Status', 'status', 'asc'],
+    ['Category', 'category', 'asc'],
+    ['Assignee', 'assignee', 'asc'],
+  ])('the %s header sorts by %s, %s first', async (label, sort, order) => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage()
+    await screen.findByRole('table', { name: 'Tickets' })
+    await user.click(sortButton(label))
+
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort, order }))
+  })
+
+  test('Received toggles to oldest first, and back to the default clears the URL', async () => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response()))
+
+    renderPage()
+    await screen.findByRole('table', { name: 'Tickets' })
+
+    await user.click(sortButton('Received'))
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort: 'createdAt', order: 'asc' }))
+    expect(currentUrl()).toBe('/tickets?sort=createdAt&order=asc')
+
+    await user.click(sortButton('Received'))
+    await waitFor(() => expect(lastParams()).toMatchObject({ sort: 'createdAt', order: 'desc' }))
+    expect(currentUrl()).toBe('/tickets')
+  })
+
+  test('sorting keeps the filters and goes back to page 1', async () => {
+    const user = userEvent.setup()
+    getSpy.mockReturnValue(ok(response({ total: 60, page: 3 })))
+
+    renderPage('/tickets?status=OPEN&page=3')
+    await screen.findByRole('table', { name: 'Tickets' })
+    await user.click(sortButton('Subject'))
+
+    await waitFor(() =>
+      expect(lastParams()).toMatchObject({ status: 'OPEN', sort: 'subject', order: 'asc', page: 1 }),
+    )
+    expect(currentUrl()).toBe('/tickets?status=OPEN&sort=subject&order=asc')
   })
 
   test('Next and Previous move between pages and are disabled at the ends', async () => {
