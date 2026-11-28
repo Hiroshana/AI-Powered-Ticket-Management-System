@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router'
@@ -27,11 +27,23 @@ const fail = (status: number) => {
   return Promise.reject(new AxiosError(`Request failed with status code ${status}`, String(status), undefined, undefined, response))
 }
 
+const assignees = [
+  { id: 'u2', name: 'Alan Agent' },
+  { id: 'u3', name: 'Bea Agent' },
+]
+
 const getSpy = spyOn(api, 'get')
+const patchSpy = spyOn(api, 'patch')
 
 afterEach(() => {
   getSpy.mockReset()
+  patchSpy.mockReset()
 })
+
+// GET /tickets/assignees returns `assignees`; any other GET returns `detail`.
+const respond = (detail: () => Promise<AxiosResponse>) =>
+  ((url: string) =>
+    url === '/tickets/assignees' ? ok({ users: assignees }) : detail()) as unknown as typeof api.get
 
 function LocationDisplay() {
   const location = useLocation()
@@ -57,19 +69,19 @@ const currentUrl = () => screen.getByRole('status', { name: 'location' }).textCo
 
 describe('TicketDetailPage', () => {
   test('shows a loading skeleton, then requests GET /tickets/:id with the abort signal', async () => {
-    getSpy.mockReturnValue(ok(ticket))
+    getSpy.mockImplementation(respond(() => ok(ticket)))
 
     renderPage()
     expect(screen.getByText('Loading ticket…')).toBeInTheDocument()
 
     expect(await screen.findByRole('heading', { name: '#42 Refund for course' })).toBeInTheDocument()
-    const [url, config] = getSpy.mock.calls[0]!
+    const [url, config] = getSpy.mock.calls.find(([url]) => url === '/tickets/42')!
     expect(url).toBe('/tickets/42')
     expect(config?.signal).toBeInstanceOf(AbortSignal)
   })
 
   test('shows the ticket fields and the body as plain text', async () => {
-    getSpy.mockReturnValue(ok(ticket))
+    getSpy.mockImplementation(respond(() => ok(ticket)))
 
     renderPage()
     await screen.findByRole('heading', { name: '#42 Refund for course' })
@@ -78,22 +90,22 @@ describe('TicketDetailPage', () => {
     expect(screen.getByText('Sam Student')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'sam@example.com' })).toHaveAttribute('href', 'mailto:sam@example.com')
     expect(screen.getByText('Refund Request')).toBeInTheDocument()
-    expect(screen.getByText('Alan Agent')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Assignee' })).toHaveDisplayValue('Alan Agent')
     // The HTML in the body is shown literally, not rendered.
     expect(screen.getByText(/I would like a refund\./).textContent).toBe(ticket.body)
   })
 
   test('shows placeholders for a missing category and assignee', async () => {
-    getSpy.mockReturnValue(ok({ ...ticket, category: null, assignee: null }))
+    getSpy.mockImplementation(respond(() => ok({ ...ticket, category: null, assignee: null })))
 
     renderPage()
 
     expect(await screen.findByText('Uncategorized')).toBeInTheDocument()
-    expect(screen.getByText('Unassigned')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Assignee' })).toHaveDisplayValue('Unassigned')
   })
 
   test('shows "not found" for a 404', async () => {
-    getSpy.mockReturnValue(fail(404))
+    getSpy.mockImplementation(respond(() => fail(404)))
 
     renderPage()
 
@@ -108,7 +120,8 @@ describe('TicketDetailPage', () => {
   })
 
   test('shows an error with a retry for other failures', async () => {
-    getSpy.mockReturnValueOnce(fail(500)).mockReturnValueOnce(ok(ticket))
+    let calls = 0
+    getSpy.mockImplementation(respond(() => (calls++ === 0 ? fail(500) : ok(ticket))))
     const user = userEvent.setup()
 
     renderPage()
@@ -119,7 +132,7 @@ describe('TicketDetailPage', () => {
   })
 
   test('"Back to tickets" returns to the list URL it came from', async () => {
-    getSpy.mockReturnValue(ok(ticket))
+    getSpy.mockImplementation(respond(() => ok(ticket)))
     const user = userEvent.setup()
 
     renderPage({ pathname: '/tickets/42', state: { listSearch: '?status=OPEN&page=2' } })
@@ -129,10 +142,78 @@ describe('TicketDetailPage', () => {
   })
 
   test('"Back to tickets" goes to the plain list when opened directly', async () => {
-    getSpy.mockReturnValue(ok(ticket))
+    getSpy.mockImplementation(respond(() => ok(ticket)))
 
     renderPage()
 
     expect(screen.getByRole('link', { name: 'Back to tickets' })).toHaveAttribute('href', '/tickets')
+  })
+
+  describe('assignee', () => {
+    test('lists active users and assigns the ticket when one is picked', async () => {
+      getSpy.mockImplementation(respond(() => ok({ ...ticket, assignee: null })))
+      patchSpy.mockReturnValue(ok({ ...ticket, assignee: assignees[1] }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Assignee' })
+      await waitFor(() => expect(select).toBeEnabled())
+      expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+        'Unassigned',
+        'Alan Agent',
+        'Bea Agent',
+      ])
+
+      await user.selectOptions(select, 'Bea Agent')
+
+      expect(patchSpy).toHaveBeenCalledWith('/tickets/42', { assigneeId: 'u3' })
+      await waitFor(() => expect(select).toBeEnabled())
+      expect(select).toHaveDisplayValue('Bea Agent')
+    })
+
+    test('picking "Unassigned" sends assigneeId: null', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      patchSpy.mockReturnValue(ok({ ...ticket, assignee: null }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Assignee' })
+      await waitFor(() => expect(select).toBeEnabled())
+      await user.selectOptions(select, 'Unassigned')
+
+      expect(patchSpy).toHaveBeenCalledWith('/tickets/42', { assigneeId: null })
+      await waitFor(() => expect(select).toHaveDisplayValue('Unassigned'))
+    })
+
+    test('shows the server error and keeps the old assignee when saving fails', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      const response = {
+        status: 400,
+        data: { error: 'Assignee must be an active user' },
+        headers: {},
+        statusText: '',
+        config: { headers: new AxiosHeaders() },
+      }
+      patchSpy.mockImplementation(() => Promise.reject(new AxiosError('Bad request', '400', undefined, undefined, response)))
+      const user = userEvent.setup()
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Assignee' })
+      await waitFor(() => expect(select).toBeEnabled())
+      await user.selectOptions(select, 'Bea Agent')
+
+      expect(await screen.findByText('Assignee must be an active user')).toBeInTheDocument()
+      expect(select).toHaveDisplayValue('Alan Agent')
+    })
+
+    test('still shows a current assignee who is no longer active', async () => {
+      getSpy.mockImplementation(respond(() => ok({ ...ticket, assignee: { id: 'gone', name: 'Old Agent' } })))
+
+      renderPage()
+      const select = await screen.findByRole('combobox', { name: 'Assignee' })
+      await waitFor(() => expect(select).toBeEnabled())
+
+      expect(select).toHaveDisplayValue('Old Agent')
+    })
   })
 })

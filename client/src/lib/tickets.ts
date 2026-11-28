@@ -85,3 +85,10 @@ export const listSearchFrom = (state: unknown): string => {
   const search = (state as Partial<TicketListLocationState> | null)?.listSearch
   return typeof search === 'string' && (search === '' || search.startsWith('?')) ? search : ''
 }
+
+// GET /api/tickets/assignees: active users a ticket can be assigned to.
+export type Assignee = { id: string; name: string }
+export type AssigneesResponse = { users: Assignee[] }
+
+// PATCH /api/tickets/:id body. `assigneeId: null` unassigns.
+export type TicketUpdate = { assigneeId: string | null }

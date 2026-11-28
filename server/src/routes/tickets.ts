@@ -121,16 +121,61 @@ const idParamSchema = z.coerce
   // Postgres INT4 max; larger ids would make Prisma throw.
   .max(2_147_483_647, "Ticket id must be a positive integer");
 
-ticketsRouter.get("/:id", async (req, res) => {
-  // Digits only: z.coerce would otherwise accept "1e2", " 7" or "0x10".
-  const parsed = /^\d+$/.test(req.params.id) ? idParamSchema.safeParse(req.params.id) : undefined;
+// Digits only: z.coerce would otherwise accept "1e2", " 7" or "0x10".
+function parseTicketId(raw: string): number {
+  const parsed = /^\d+$/.test(raw) ? idParamSchema.safeParse(raw) : undefined;
   if (!parsed?.success) throw new HttpError(400, "Ticket id must be a positive integer");
+  return parsed.data;
+}
 
+// Who a ticket can be assigned to: every active user (agents and admins), as
+// { id, name } only. Readable by agents, unlike the admin-only GET /api/users.
+// Declared before "/:id" so "assignees" isn't taken for a ticket id.
+ticketsRouter.get("/assignees", async (_req, res) => {
+  const users = await prisma.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+  });
+  res.json({ users });
+});
+
+ticketsRouter.get("/:id", async (req, res) => {
   const ticket = await prisma.ticket.findUnique({
-    where: { id: parsed.data },
+    where: { id: parseTicketId(req.params.id) },
     select: ticketDetailFields,
   });
   if (!ticket) throw new HttpError(404, "Ticket not found");
+
+  res.json(ticket);
+});
+
+// `assigneeId: null` unassigns. Keep in sync with the client's TicketUpdate type.
+const updateTicketSchema = z.object({
+  assigneeId: z.string("Assignee must be a user id or null").min(1, "Assignee must be a user id or null").max(100).nullable(),
+});
+
+ticketsRouter.patch("/:id", async (req, res) => {
+  const id = parseTicketId(req.params.id);
+  const parsed = updateTicketSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw new HttpError(400, parsed.error.issues[0]?.message ?? "Invalid request");
+  }
+  const { assigneeId } = parsed.data;
+
+  const ticket = await prisma.$transaction(async (tx) => {
+    // Only active (not soft-deleted) users can be assigned.
+    if (assigneeId !== null) {
+      const assignee = await tx.user.findFirst({
+        where: { id: assigneeId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!assignee) throw new HttpError(400, "Assignee must be an active user");
+    }
+    const existing = await tx.ticket.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new HttpError(404, "Ticket not found");
+    return tx.ticket.update({ where: { id }, data: { assigneeId }, select: ticketDetailFields });
+  });
 
   res.json(ticket);
 });

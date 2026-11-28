@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Server } from "node:http";
 import { createApp } from "./app.ts";
 import { prisma } from "./lib/prisma.ts";
-import { createCredentialUser } from "./lib/users.ts";
+import { createCredentialUser, softDeleteUser } from "./lib/users.ts";
 
 const id = crypto.randomUUID();
 const password = "correct-horse-battery";
@@ -366,3 +366,115 @@ test.each(["abc", "0", "-1", "1.5", "1e2", "2147483648"])(
     expect(await res.json()).toEqual({ error: "Ticket id must be a positive integer" });
   },
 );
+
+// GET /api/tickets/assignees
+
+test("GET /api/tickets/assignees requires a session", async () => {
+  const res = await fetch(`${baseUrl}/api/tickets/assignees`);
+  expect(res.status).toBe(401);
+});
+
+test("GET /api/tickets/assignees lists active users as { id, name } for agents", async () => {
+  const res = await fetch(`${baseUrl}/api/tickets/assignees`, { headers: { Cookie: agentCookie } });
+  expect(res.status).toBe(200);
+  const { users } = (await res.json()) as { users: { id: string; name: string }[] };
+  expect(users).toContainEqual({ id: agentId, name: agent.name });
+  expect(users).toContainEqual({ id: adminId, name: admin.name });
+  for (const user of users) expect(Object.keys(user).sort()).toEqual(["id", "name"]);
+  const names = users.map((u) => u.name);
+  expect(names).toEqual([...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+});
+
+// PATCH /api/tickets/:id
+
+const patchTicket = (ticketId: string | number, body: unknown, cookie: string | null = agentCookie) =>
+  fetch(`${baseUrl}/api/tickets/${ticketId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
+
+// A throwaway ticket per test, so assignment changes don't leak into the list tests.
+async function scratchTicket() {
+  return prisma.ticket.create({
+    data: { subject: `scratch ${id}`, body: "Body", fromEmail: sender, fromName: "Scratch", createdAt: at(0) },
+  });
+}
+
+test("PATCH /api/tickets/:id requires a session", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { assigneeId: agentId }, null);
+  expect(res.status).toBe(401);
+});
+
+test("agents can assign a ticket, and the response is the full updated ticket", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { assigneeId: agentId });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { id: number; body: string; assignee: unknown };
+  expect(body.id).toBe(ticket.id);
+  expect(body.body).toBe("Body");
+  expect(body.assignee).toEqual({ id: agentId, name: agent.name });
+  const row = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+  expect(row.assigneeId).toBe(agentId);
+});
+
+test("admins can reassign a ticket, including to an admin", async () => {
+  const ticket = await scratchTicket();
+  await patchTicket(ticket.id, { assigneeId: agentId }, adminCookie);
+  const res = await patchTicket(ticket.id, { assigneeId: adminId }, adminCookie);
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { assignee: unknown }).assignee).toEqual({ id: adminId, name: admin.name });
+});
+
+test("assigneeId: null unassigns a ticket", async () => {
+  const ticket = await scratchTicket();
+  await patchTicket(ticket.id, { assigneeId: agentId });
+  const res = await patchTicket(ticket.id, { assigneeId: null });
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { assignee: unknown }).assignee).toBeNull();
+});
+
+test("rejects an unknown assignee", async () => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, { assigneeId: "no-such-user" });
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error: "Assignee must be an active user" });
+});
+
+test("rejects a deleted user as assignee", async () => {
+  const ticket = await scratchTicket();
+  const gone = await createCredentialUser({
+    email: `tickets-gone-${id}@example.com`,
+    name: "Gone Agent",
+    role: "AGENT",
+    password,
+  });
+  try {
+    await softDeleteUser(gone.id);
+    const res = await patchTicket(ticket.id, { assigneeId: gone.id });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Assignee must be an active user" });
+  } finally {
+    await prisma.user.delete({ where: { id: gone.id } });
+  }
+});
+
+test.each([{}, { assigneeId: 5 }, { assigneeId: "" }])("rejects the body %j", async (body) => {
+  const ticket = await scratchTicket();
+  const res = await patchTicket(ticket.id, body);
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error: "Assignee must be a user id or null" });
+});
+
+test("PATCH a missing ticket returns 404", async () => {
+  const res = await patchTicket(2_147_483_647, { assigneeId: agentId });
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: "Ticket not found" });
+});
+
+test("PATCH with a bad id returns 400", async () => {
+  const res = await patchTicket("abc", { assigneeId: agentId });
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error: "Ticket id must be a positive integer" });
+});

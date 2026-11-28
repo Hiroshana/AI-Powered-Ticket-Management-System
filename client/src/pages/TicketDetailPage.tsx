@@ -10,6 +10,7 @@ import {
   ticketStatusLabels,
   type TicketDetail,
 } from '@/lib/tickets'
+import TicketAssigneeSelect from '@/components/TicketAssigneeSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -120,9 +121,7 @@ export default function TicketDetailPage() {
                     <span className="text-muted-foreground">Uncategorized</span>
                   )}
                 </Detail>
-                <Detail label="Assignee">
-                  {ticket.assignee?.name ?? <span className="text-muted-foreground">Unassigned</span>}
-                </Detail>
+                <TicketAssigneeSelect ticket={ticket} />
                 <Detail label="Received">{dateFormat.format(new Date(ticket.createdAt))}</Detail>
               </dl>
             </CardContent>
