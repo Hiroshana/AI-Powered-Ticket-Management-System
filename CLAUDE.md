@@ -27,6 +27,7 @@ Run from the repo root (Bun workspaces: `client`, `server`). Use `bun`, never np
 - `cd server && bun run db:test:prepare` — create/migrate the test DB, empty all tables, seed the `E2E_*` users
 - `cd server && bun run db:migrate -- --name <name>` — create + apply a migration after editing `prisma/schema.prisma`
 - `cd server && bun run db:generate` — regenerate Prisma Client (also runs on `bun install`)
+- `cd server && bun run db:seed:tickets` — add 100 demo tickets to the dev DB (varied status/category/assignee/dates; idempotent via fixed Message-IDs; refuses `*_test` DBs)
 - `cd server && bun run db:studio` — browse data
 - Add a dependency: `cd client && bun add <pkg>` (or `server`)
 
