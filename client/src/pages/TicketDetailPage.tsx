@@ -14,6 +14,7 @@ import {
 } from '@/lib/tickets'
 import TicketAssigneeSelect from '@/components/TicketAssigneeSelect'
 import TicketFieldSelect, { type SelectOption } from '@/components/TicketFieldSelect'
+import TicketReplies from '@/components/TicketReplies'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -160,6 +161,8 @@ export default function TicketDetailPage() {
                   <p className="text-sm break-words whitespace-pre-wrap">{ticket.body}</p>
                 </CardContent>
               </Card>
+
+              <TicketReplies ticketId={ticket.id} />
             </div>
 
             <Card>

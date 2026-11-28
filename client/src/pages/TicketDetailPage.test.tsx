@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router'
 import { api } from '@/lib/api'
-import type { TicketDetail } from '@/lib/tickets'
+import type { TicketDetail, TicketReply } from '@/lib/tickets'
 import TicketDetailPage from './TicketDetailPage.tsx'
 
 const ticket: TicketDetail = {
@@ -32,18 +32,38 @@ const assignees = [
   { id: 'u3', name: 'Bea Agent' },
 ]
 
+const replies: TicketReply[] = [
+  {
+    id: 1,
+    body: 'Thanks, looking into it.\n<i>Alan</i>',
+    createdAt: '2026-11-21T09:00:00.000Z',
+    author: { id: 'u2', name: 'Alan Agent' },
+  },
+  { id: 2, body: 'Refund issued.', createdAt: '2026-11-22T09:00:00.000Z', author: null },
+]
+
 const getSpy = spyOn(api, 'get')
 const patchSpy = spyOn(api, 'patch')
+const postSpy = spyOn(api, 'post')
 
 afterEach(() => {
   getSpy.mockReset()
   patchSpy.mockReset()
+  postSpy.mockReset()
 })
 
-// GET /tickets/assignees returns `assignees`; any other GET returns `detail`.
-const respond = (detail: () => Promise<AxiosResponse>) =>
+// GET /tickets/assignees returns `assignees`, GET /tickets/:id/replies returns
+// `thread()` (no replies by default); any other GET returns `detail`.
+const respond = (
+  detail: () => Promise<AxiosResponse>,
+  thread: () => Promise<AxiosResponse> = () => ok({ replies: [] }),
+) =>
   ((url: string) =>
-    url === '/tickets/assignees' ? ok({ users: assignees }) : detail()) as unknown as typeof api.get
+    url === '/tickets/assignees'
+      ? ok({ users: assignees })
+      : url.endsWith('/replies')
+        ? thread()
+        : detail()) as unknown as typeof api.get
 
 function LocationDisplay() {
   const location = useLocation()
@@ -286,6 +306,121 @@ describe('TicketDetailPage', () => {
       expect(await screen.findByText('Something went wrong. Please try again.')).toBeInTheDocument()
       expect(screen.getAllByRole('alert')).toHaveLength(1)
       expect(select).toHaveDisplayValue('Open')
+    })
+  })
+
+  describe('replies', () => {
+    test('shows the thread oldest first, as plain text, with authors', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket), () => ok({ replies })))
+
+      renderPage()
+      const list = await screen.findByRole('list', { name: 'Replies' })
+
+      expect(getSpy.mock.calls.find(([url]) => url === '/tickets/42/replies')?.[1]?.signal).toBeInstanceOf(
+        AbortSignal,
+      )
+      const items = within(list).getAllByRole('listitem')
+      expect(items).toHaveLength(2)
+      expect(items[0]).toHaveTextContent('Alan Agent')
+      // HTML in a reply is shown literally.
+      expect(within(items[0]!).getByText(/Thanks, looking into it\./).textContent).toBe(replies[0]!.body)
+      expect(items[1]).toHaveTextContent('Deleted user')
+      expect(items[1]).toHaveTextContent('Refund issued.')
+    })
+
+    test('says when there are no replies yet', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+
+      renderPage()
+
+      expect(await screen.findByText('No replies yet.')).toBeInTheDocument()
+    })
+
+    test('shows an error with a retry when the thread fails to load', async () => {
+      let calls = 0
+      getSpy.mockImplementation(respond(() => ok(ticket), () => (calls++ === 0 ? fail(500) : ok({ replies }))))
+      const user = userEvent.setup()
+
+      renderPage()
+      expect(await screen.findByText('Could not load the replies.')).toBeInTheDocument()
+      // The ticket itself still shows.
+      expect(screen.getByRole('heading', { name: '#42 Refund for course' })).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByRole('list', { name: 'Replies' })).toBeInTheDocument()
+    })
+
+    test('sends a reply, adds it to the thread and clears the form', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      const created: TicketReply = {
+        id: 3,
+        body: 'We will get back to you.',
+        createdAt: '2026-11-23T09:00:00.000Z',
+        author: { id: 'u2', name: 'Alan Agent' },
+      }
+      postSpy.mockReturnValue(ok(created))
+      const user = userEvent.setup()
+
+      renderPage()
+      await screen.findByText('No replies yet.')
+      const textbox = screen.getByRole('textbox', { name: 'New reply' })
+      await user.type(textbox, '  We will get back to you.  ')
+      await user.click(screen.getByRole('button', { name: 'Send reply' }))
+
+      expect(postSpy).toHaveBeenCalledWith('/tickets/42/replies', { body: 'We will get back to you.' })
+      const list = await screen.findByRole('list', { name: 'Replies' })
+      expect(within(list).getByText('We will get back to you.')).toBeInTheDocument()
+      expect(textbox).toHaveValue('')
+      expect(screen.queryByText('No replies yet.')).not.toBeInTheDocument()
+    })
+
+    test('Ctrl+Enter sends the reply', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      postSpy.mockReturnValue(ok({ ...replies[0], id: 9, body: 'Quick one' }))
+      const user = userEvent.setup()
+
+      renderPage()
+      const textbox = await screen.findByRole('textbox', { name: 'New reply' })
+      await user.type(textbox, 'Quick one')
+      await user.keyboard('{Control>}{Enter}{/Control}')
+
+      expect(postSpy).toHaveBeenCalledWith('/tickets/42/replies', { body: 'Quick one' })
+      await waitFor(() => expect(textbox).toHaveValue(''))
+    })
+
+    test('a blank reply shows a validation error without calling the server', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      const user = userEvent.setup()
+
+      renderPage()
+      const textbox = await screen.findByRole('textbox', { name: 'New reply' })
+      await user.type(textbox, '   ')
+      await user.click(screen.getByRole('button', { name: 'Send reply' }))
+
+      expect(await screen.findByText('Reply is required')).toBeInTheDocument()
+      expect(textbox).toHaveAttribute('aria-invalid', 'true')
+      expect(postSpy).not.toHaveBeenCalled()
+    })
+
+    test('shows the server error and keeps the draft when sending fails', async () => {
+      getSpy.mockImplementation(respond(() => ok(ticket)))
+      const response = {
+        status: 404,
+        data: { error: 'Ticket not found' },
+        headers: {},
+        statusText: '',
+        config: { headers: new AxiosHeaders() },
+      }
+      postSpy.mockImplementation(() => Promise.reject(new AxiosError('Not found', '404', undefined, undefined, response)))
+      const user = userEvent.setup()
+
+      renderPage()
+      const textbox = await screen.findByRole('textbox', { name: 'New reply' })
+      await user.type(textbox, 'Hello')
+      await user.click(screen.getByRole('button', { name: 'Send reply' }))
+
+      expect(await screen.findByText('Ticket not found')).toBeInTheDocument()
+      expect(textbox).toHaveValue('Hello')
     })
   })
 })

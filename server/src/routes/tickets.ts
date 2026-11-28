@@ -198,3 +198,57 @@ ticketsRouter.patch("/:id", async (req, res) => {
 
   res.json(ticket);
 });
+
+// Replies in the ticket's thread. Keep in sync with the client's TicketReply type.
+const replyFields = {
+  id: true,
+  body: true,
+  createdAt: true,
+  author: { select: { id: true, name: true } },
+} as const;
+
+// Oldest first, so the thread reads top to bottom.
+ticketsRouter.get("/:id/replies", async (req, res) => {
+  const id = parseTicketId(req.params.id);
+  const ticket = await prisma.ticket.findUnique({
+    where: { id },
+    select: {
+      replies: { select: replyFields, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+    },
+  });
+  if (!ticket) throw new HttpError(404, "Ticket not found");
+
+  res.json({ replies: ticket.replies });
+});
+
+const createReplySchema = z.object({
+  body: z
+    .string("Reply must be text")
+    .trim()
+    .min(1, "Reply is required")
+    .max(10_000, "Reply must be at most 10,000 characters"),
+});
+
+// Adds a reply by the signed-in user. Outbound email isn't set up yet, so the
+// reply is only stored on the ticket.
+ticketsRouter.post("/:id/replies", async (req, res) => {
+  const id = parseTicketId(req.params.id);
+  const parsed = createReplySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw new HttpError(400, parsed.error.issues[0]?.message ?? "Invalid request");
+  }
+
+  const reply = await prisma.$transaction(async (tx) => {
+    const existing = await tx.ticket.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new HttpError(404, "Ticket not found");
+    const created = await tx.ticketReply.create({
+      data: { ticketId: id, body: parsed.data.body, authorId: req.user!.id },
+      select: replyFields,
+    });
+    // A reply is activity on the ticket.
+    await tx.ticket.update({ where: { id }, data: { updatedAt: new Date() } });
+    return created;
+  });
+
+  res.status(201).json(reply);
+});

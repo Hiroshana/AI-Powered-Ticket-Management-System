@@ -97,3 +97,13 @@ export type TicketUpdate = Partial<{
   status: TicketStatus
   category: TicketCategory | null
 }>
+
+// GET /api/tickets/:id/replies (oldest first) and POST's 201 body. `author` is
+// null if the user row was removed.
+export type TicketReply = {
+  id: number
+  body: string
+  createdAt: string
+  author: { id: string; name: string } | null
+}
+export type TicketRepliesResponse = { replies: TicketReply[] }

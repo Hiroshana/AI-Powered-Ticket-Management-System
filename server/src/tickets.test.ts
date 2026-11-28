@@ -532,3 +532,96 @@ test("PATCH with a bad id returns 400", async () => {
   expect(res.status).toBe(400);
   expect(await res.json()).toEqual({ error: "Ticket id must be a positive integer" });
 });
+
+// GET / POST /api/tickets/:id/replies
+
+type Reply = { id: number; body: string; createdAt: string; author: { id: string; name: string } | null };
+
+const getReplies = (ticketId: string | number, cookie: string | null = agentCookie) =>
+  fetch(`${baseUrl}/api/tickets/${ticketId}/replies`, { headers: cookie ? { Cookie: cookie } : {} });
+
+const postReply = (ticketId: string | number, body: unknown, cookie: string | null = agentCookie) =>
+  fetch(`${baseUrl}/api/tickets/${ticketId}/replies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  });
+
+test("replies require a session", async () => {
+  const ticket = await scratchTicket();
+  expect((await getReplies(ticket.id, null)).status).toBe(401);
+  expect((await postReply(ticket.id, { body: "Hi" }, null)).status).toBe(401);
+  expect(await prisma.ticketReply.count({ where: { ticketId: ticket.id } })).toBe(0);
+});
+
+test("a new ticket has no replies", async () => {
+  const ticket = await scratchTicket();
+  const res = await getReplies(ticket.id);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ replies: [] });
+});
+
+test("POST a reply stores it with the signed-in user as author and returns it", async () => {
+  const ticket = await scratchTicket();
+  const res = await postReply(ticket.id, { body: "  Thanks, we're on it.\n  " });
+  expect(res.status).toBe(201);
+  const reply = (await res.json()) as Reply;
+  expect(reply).toMatchObject({ body: "Thanks, we're on it.", author: { id: agentId, name: agent.name } });
+  expect(Object.keys(reply).sort()).toEqual(["author", "body", "createdAt", "id"]);
+
+  const row = await prisma.ticketReply.findUniqueOrThrow({ where: { id: reply.id } });
+  expect(row).toMatchObject({ ticketId: ticket.id, authorId: agentId });
+  // Replying counts as activity on the ticket.
+  const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+  expect(updated.updatedAt.getTime()).toBeGreaterThan(ticket.updatedAt.getTime());
+});
+
+test("GET replies lists the thread oldest first, from agents and admins", async () => {
+  const ticket = await scratchTicket();
+  await postReply(ticket.id, { body: "first" }, agentCookie);
+  await postReply(ticket.id, { body: "second" }, adminCookie);
+  await postReply(ticket.id, { body: "third" }, agentCookie);
+
+  const res = await getReplies(ticket.id, adminCookie);
+  expect(res.status).toBe(200);
+  const { replies } = (await res.json()) as { replies: Reply[] };
+  expect(replies.map((r) => [r.body, r.author?.name])).toEqual([
+    ["first", agent.name],
+    ["second", admin.name],
+    ["third", agent.name],
+  ]);
+});
+
+test("replies on other tickets are not included", async () => {
+  const [a, b] = [await scratchTicket(), await scratchTicket()];
+  await postReply(a.id, { body: "for a" });
+  const { replies } = (await (await getReplies(b.id)).json()) as { replies: Reply[] };
+  expect(replies).toEqual([]);
+});
+
+test.each([
+  [{}, "Reply must be text"],
+  [{ body: 5 }, "Reply must be text"],
+  [{ body: "   \n " }, "Reply is required"],
+  [{ body: "a".repeat(10_001) }, "Reply must be at most 10,000 characters"],
+])("POST an invalid reply %j returns 400", async (payload, error) => {
+  const ticket = await scratchTicket();
+  const res = await postReply(ticket.id, payload);
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error });
+  expect(await prisma.ticketReply.count({ where: { ticketId: ticket.id } })).toBe(0);
+});
+
+test("replies on a missing ticket return 404", async () => {
+  for (const res of [await getReplies(2_147_483_647), await postReply(2_147_483_647, { body: "Hi" })]) {
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Ticket not found" });
+  }
+});
+
+test("replies with a bad ticket id return 400", async () => {
+  for (const res of [await getReplies("abc"), await postReply("1e2", { body: "Hi" })]) {
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Ticket id must be a positive integer" });
+  }
+});

@@ -32,6 +32,7 @@
 - [x] Implement update ticket API endpoint (change status and category, assign agent: `PATCH /api/tickets/:id`)
 - [x] Create ticket list page with filtering and sorting
 - [x] Create ticket detail page (status, category and assignee are editable)
+- [x] Reply to tickets (`GET`/`POST /api/tickets/:id/replies`; thread and reply form on the detail page)
 
 ## Phase 5: AI Features
 
