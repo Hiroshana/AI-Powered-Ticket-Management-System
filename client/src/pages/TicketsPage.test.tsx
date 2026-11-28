@@ -468,4 +468,16 @@ describe('TicketsPage', () => {
     expect(await screen.findByRole('table', { name: 'Tickets' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  test('the subject links to the ticket detail page', async () => {
+    getSpy.mockReturnValue(ok(response()))
+    const user = userEvent.setup()
+
+    renderPage('/tickets?status=OPEN&page=2')
+    const link = await screen.findByRole('link', { name: 'Refund for course' })
+    expect(link).toHaveAttribute('href', '/tickets/42')
+
+    await user.click(link)
+    expect(currentUrl()).toBe('/tickets/42')
+  })
 })

@@ -10,7 +10,7 @@ import {
   type OnChangeFn,
   type SortingState,
 } from '@tanstack/react-table'
-import { useSearchParams } from 'react-router'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { api } from '@/lib/api'
 import {
   DEFAULT_ORDER,
@@ -25,6 +25,7 @@ import {
   ticketCategoryLabels,
   ticketStatusLabels,
   type TicketListItem,
+  type TicketListLocationState,
   type TicketListResponse,
 } from '@/lib/tickets'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -55,6 +56,23 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 const features = tableFeatures({ rowSortingFeature })
 const columnHelper = createColumnHelper<typeof features, TicketListItem>()
 
+// Opens the ticket's detail page. The list's URL search travels along as
+// location state, so "Back to tickets" restores the same filters and page.
+function SubjectLink({ id, subject }: { id: number; subject: string }) {
+  const { search } = useLocation()
+  const state: TicketListLocationState = { listSearch: search }
+  return (
+    <Link
+      to={`/tickets/${id}`}
+      state={state}
+      className="block max-w-[40ch] truncate font-medium hover:underline"
+      title={subject}
+    >
+      {subject}
+    </Link>
+  )
+}
+
 // Column ids are the server's sort keys (TicketSortKey).
 const columns = columnHelper.columns([
   columnHelper.accessor('id', {
@@ -65,11 +83,7 @@ const columns = columnHelper.columns([
   columnHelper.accessor('subject', {
     header: 'Subject',
     // Long subjects are cut off (full text on hover) so the table fits the page.
-    cell: (info) => (
-      <span className="block max-w-[40ch] truncate font-medium" title={info.getValue()}>
-        {info.getValue()}
-      </span>
-    ),
+    cell: (info) => <SubjectLink id={info.row.original.id} subject={info.getValue()} />,
   }),
   columnHelper.accessor('fromName', {
     header: 'From',

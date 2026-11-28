@@ -309,3 +309,60 @@ test("rejects a q longer than 200 characters", async () => {
   expect(res.status).toBe(400);
   expect(await res.json()).toEqual({ error: "Search must be at most 200 characters" });
 });
+
+// GET /api/tickets/:id
+
+const getTicket = (ticketId: string | number, cookie: string | null = agentCookie) =>
+  fetch(`${baseUrl}/api/tickets/${ticketId}`, { headers: cookie ? { Cookie: cookie } : {} });
+
+const ticketBySubject = (subject: string) =>
+  prisma.ticket.findFirstOrThrow({ where: { subject: `${subject} ${id}` } });
+
+test("GET /api/tickets/:id without a session returns 401", async () => {
+  const ticket = await ticketBySubject("newest");
+  const res = await getTicket(ticket.id, null);
+  expect(res.status).toBe(401);
+});
+
+test("GET /api/tickets/:id returns the full ticket for agents and admins", async () => {
+  const ticket = await ticketBySubject("newest");
+  for (const cookie of [agentCookie, adminCookie]) {
+    const res = await getTicket(ticket.id, cookie);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({
+      id: ticket.id,
+      subject: `newest ${id}`,
+      body: "Body",
+      fromName: "Eve",
+      fromEmail: sender,
+      status: "OPEN",
+      category: "REFUND_REQUEST",
+      createdAt: ticket.createdAt.toISOString(),
+      updatedAt: ticket.updatedAt.toISOString(),
+      assignee: { id: agentId, name: agent.name },
+    });
+  }
+});
+
+test("GET /api/tickets/:id returns a null assignee and category when unset", async () => {
+  const ticket = await ticketBySubject("tie-b");
+  const body = (await (await getTicket(ticket.id)).json()) as { assignee: unknown; category: unknown };
+  expect(body.assignee).toBeNull();
+  expect(body.category).toBeNull();
+});
+
+test("GET /api/tickets/:id returns 404 for a missing ticket", async () => {
+  const res = await getTicket(2_147_483_647);
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: "Ticket not found" });
+});
+
+test.each(["abc", "0", "-1", "1.5", "1e2", "2147483648"])(
+  "GET /api/tickets/%s returns 400",
+  async (bad) => {
+    const res = await getTicket(bad);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Ticket id must be a positive integer" });
+  },
+);

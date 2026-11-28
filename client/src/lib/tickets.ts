@@ -70,3 +70,18 @@ export type TicketListResponse = {
   sort: TicketSortKey
   order: SortOrder
 }
+
+// GET /api/tickets/:id: the list fields plus the email body.
+export type TicketDetail = TicketListItem & {
+  body: string
+  updatedAt: string
+}
+
+// Location state the ticket list passes to the detail page, so "Back to
+// tickets" returns to the same search, filters, sort and page.
+export type TicketListLocationState = { listSearch: string }
+
+export const listSearchFrom = (state: unknown): string => {
+  const search = (state as Partial<TicketListLocationState> | null)?.listSearch
+  return typeof search === 'string' && (search === '' || search.startsWith('?')) ? search : ''
+}

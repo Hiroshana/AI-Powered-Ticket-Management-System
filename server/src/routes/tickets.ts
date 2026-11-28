@@ -105,3 +105,32 @@ ticketsRouter.get("/", async (req, res) => {
 
   res.json({ tickets, total, page, pageSize, sort, order });
 });
+
+// Full ticket for the detail page: list fields plus the email body. The
+// Message-ID stays internal.
+const ticketDetailFields = {
+  ...ticketListFields,
+  body: true,
+  updatedAt: true,
+} as const;
+
+const idParamSchema = z.coerce
+  .number("Ticket id must be a positive integer")
+  .int("Ticket id must be a positive integer")
+  .min(1, "Ticket id must be a positive integer")
+  // Postgres INT4 max; larger ids would make Prisma throw.
+  .max(2_147_483_647, "Ticket id must be a positive integer");
+
+ticketsRouter.get("/:id", async (req, res) => {
+  // Digits only: z.coerce would otherwise accept "1e2", " 7" or "0x10".
+  const parsed = /^\d+$/.test(req.params.id) ? idParamSchema.safeParse(req.params.id) : undefined;
+  if (!parsed?.success) throw new HttpError(400, "Ticket id must be a positive integer");
+
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: parsed.data },
+    select: ticketDetailFields,
+  });
+  if (!ticket) throw new HttpError(404, "Ticket not found");
+
+  res.json(ticket);
+});
