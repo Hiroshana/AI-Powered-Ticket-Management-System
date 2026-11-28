@@ -19,6 +19,11 @@ export default function Layout() {
           <Link to="/" className="font-semibold">
             AI - Powered Ticket Management System
           </Link>
+          {session && (
+            <Link to="/tickets" className="text-sm hover:underline">
+              Tickets
+            </Link>
+          )}
           {session?.user.role === 'ADMIN' && (
             <Link to="/users" className="text-sm hover:underline">
               Users

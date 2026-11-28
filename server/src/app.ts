@@ -6,6 +6,7 @@ import { healthRouter } from "./routes/health.ts";
 import { meRouter } from "./routes/me.ts";
 import { usersRouter } from "./routes/users.ts";
 import { inboundEmailRouter } from "./routes/inbound-email.ts";
+import { ticketsRouter } from "./routes/tickets.ts";
 import { errorHandler, notFound } from "./middleware/error.ts";
 
 export function createApp() {
@@ -29,6 +30,7 @@ export function createApp() {
   app.use("/api/health", healthRouter);
   app.use("/api/me", meRouter);
   app.use("/api/users", usersRouter);
+  app.use("/api/tickets", ticketsRouter);
 
   app.use(notFound);
   app.use(errorHandler);
