@@ -117,6 +117,7 @@ test("concurrent deliveries of the same email create one ticket", async () => {
 
 test.each([
   [{ from: "not-an-email" }, "Enter a valid sender email address"],
+  [{ from: undefined }, "Enter a valid sender email address"],
   [{ fromName: undefined }, "Sender name is required"],
   [{ fromName: "   " }, "Sender name is required"],
   [{ text: undefined }, "Email body is required"],

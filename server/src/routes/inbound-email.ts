@@ -24,7 +24,7 @@ const requireInboundSecret: RequestHandler = (req, _res, next) => {
 };
 
 const inboundEmailSchema = z.object({
-  from: z.string().trim().toLowerCase().pipe(z.email("Enter a valid sender email address")),
+  from: z.string("Enter a valid sender email address").trim().toLowerCase().pipe(z.email("Enter a valid sender email address")),
   fromName: z
     .string("Sender name is required")
     .trim()

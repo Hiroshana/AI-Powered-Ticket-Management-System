@@ -10,6 +10,7 @@ import {
   test,
   tokenOf,
 } from './helpers/auth.ts'
+import { CLIENT_URL } from './helpers/servers.ts'
 
 const SIGN_IN = '/api/auth/sign-in/email'
 const UNTRUSTED = 'https://evil.example'
@@ -145,7 +146,7 @@ test.describe('CSRF protection', () => {
 
   for (const { name, headers } of [
     { name: 'an untrusted Origin', headers: { origin: UNTRUSTED } },
-    { name: 'a look-alike Origin', headers: { origin: 'http://localhost:5174.evil.example' } },
+    { name: 'a look-alike Origin', headers: { origin: `${CLIENT_URL}.evil.example` } },
     { name: 'a null Origin', headers: { origin: 'null' } },
     { name: 'an untrusted Referer and no Origin', headers: { referer: `${UNTRUSTED}/login` } },
   ]) {

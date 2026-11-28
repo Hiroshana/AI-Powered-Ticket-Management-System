@@ -1,10 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import { CLIENT_URL, SERVER_URL } from './tests/helpers/servers.ts'
 
-// E2E runs use their own server (:3001) and client (:5174) against the
-// ai_powered_ims_test database (server/.env.test), so they never touch dev data
-// and can run alongside `bun run dev`.
-const SERVER_URL = 'http://localhost:3001'
-const CLIENT_URL = 'http://localhost:5174'
+// E2E runs use their own server and client (ports from server/.env.test) against
+// the ai_powered_ims_test database, so they never touch dev data and can run
+// alongside `bun run dev`.
+const CLIENT_PORT = new URL(CLIENT_URL).port
 
 export default defineConfig({
   testDir: './tests',
@@ -36,7 +36,7 @@ export default defineConfig({
     {
       name: 'client',
       cwd: '../client',
-      command: 'bun run dev --port 5174 --strictPort',
+      command: `bun run dev --port ${CLIENT_PORT} --strictPort`,
       url: CLIENT_URL,
       env: { API_PROXY_TARGET: SERVER_URL },
       reuseExistingServer: false,

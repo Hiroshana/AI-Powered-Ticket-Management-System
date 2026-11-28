@@ -1,20 +1,7 @@
-import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { parseEnv } from 'node:util'
 import { test as base, expect } from '@playwright/test'
 import type { APIRequestContext, BrowserContext, Page } from '@playwright/test'
-
-// Parsed rather than loaded into process.env, so the web servers Playwright
-// starts can't inherit these values.
-const env = parseEnv(
-  readFileSync(path.resolve(import.meta.dirname, '../../../server/.env.test'), 'utf8'),
-)
-
-function required(name: string): string {
-  const value = env[name]
-  if (!value) throw new Error(`${name} must be set in server/.env.test`)
-  return value
-}
+import { required } from './env.ts'
 
 export type TestUser = { name: string; email: string; password: string; role: 'ADMIN' | 'AGENT' }
 
